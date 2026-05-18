@@ -5,11 +5,11 @@ import json
 import requests
 import wave
 
-# Sayfa ayarları
-st.set_page_config(page_title="Reels Asistanım", page_icon="🎬", layout="centered")
+# Sayfa ayarları (Senin için geniş ekrana aldım, daha rahat okunur)
+st.set_page_config(page_title="otoXtra Asistanım", page_icon="🏎️", layout="wide")
 
-st.title("🎬 Otomatik Reels Asistanı")
-st.write("Videonun konusunu yaz; seslendirmeni, açıklamanı ve videoya uygun müziği anında al!")
+st.title("🏎️ otoXtra — Otomatik Reels Asistanı")
+st.write("Videonun konusunu, süresini ve varsa özel notunu yaz; otoXtra gerisini halletsin!")
 
 # API Şifrelerini Gizli Kasadan Çekme
 try:
@@ -19,37 +19,35 @@ except Exception:
     st.error("🔑 API anahtarları bulunamadı! Lütfen Streamlit ayarlarından (Secrets) şifrelerinizi girin.")
     st.stop()
 
-# Sol menü - Harika Google AI Studio Sesleri!
+# Sol menü - Ses Seçimi
 with st.sidebar:
-    st.header("🎙️ AI Studio Sesleri")
+    st.header("🎙️ Ses Ayarları")
     ses_secimi = st.selectbox("Seslendiren Seçimi", [
         "Autonoe (Parlak ve Canlı - Kadın)",
+        "Puck (Eğlenceli ve Enerjik - Erkek)",
         "Aoede (Havadar ve Yumuşak - Kadın)",
         "Callirrhoe (Rahat ve Doğal - Kadın)",
         "Kore (Net ve Kendinden Emin - Kadın)",
         "Leda (Genç ve Dinamik - Kadın)",
         "Zephyr (Parlak - Kadın)",
-        "Puck (Eğlenceli ve Enerjik - Erkek)",
         "Charon (Bilgilendirici - Erkek)",
         "Orus (Net ve Sert - Erkek)",
         "Iapetus (Temiz ve Akıcı - Erkek)",
         "Umbriel (Rahat - Erkek)"
     ])
 
-video_icerigi = st.text_area("Videoda ne var? Kısaca anlat:", height=150)
+video_icerigi = st.text_area("Videonun konusunu, tahmini süresini (örn: 30 sn) ve varsa özel isteklerini yaz:", height=150)
 
-if st.button("🚀 Reels İçeriğini Üret!"):
+if st.button("🚀 otoXtra İçeriğini Üret!"):
     if not video_icerigi:
         st.warning("Lütfen videoda ne olduğunu yazın.")
         st.stop()
 
-    with st.spinner("Senaryo yazılıyor, AI Studio sesi üretiliyor ve müzik aranıyor... (Bu biraz sürebilir)"):
+    with st.spinner("otoXtra senaryoyu yazıyor, AI Studio sesi üretiliyor ve müzik aranıyor... (Bu işlem 15-20 saniye sürebilir)"):
         try:
             client = genai.Client(api_key=gemini_key)
             
-            # =================================================================
-            # BURAYA KENDİ GEM'İNİN KURALLARINI YAZACAKSIN
-            # =================================================================
+            # Senin Muazzam otoXtra Kuralların
             BENIM_GEM_KURALLARIM = """
 # otoXtra — INSTAGRAM REELS İÇERİK ASİSTANI v3.1
 
@@ -1454,19 +1452,23 @@ Her çıktıda şu kontrolleri yap:
 
 
 ☐ Engagement bait: tüm çıktıda Bölüm 7 ihlali YOK
-            """
-            
-            # Arka plan teknik talimatları (Burası çıktı formatını sağlar)
-            system_prompt = f"""
-            Aşağıdaki kurallara kesinlikle uymak zorundasın:
-            {BENIM_GEM_KURALLARIM}
-            
-            Kullanıcının verdiği video fikrine göre şu 3 veriyi üret:
-            1. 'seslendirme_metni': Senin kurallarına göre yazılmış arka plan konuşma metni.
-            2. 'reels_aciklamasi': Senin kurallarına göre yazılmış video açıklaması (hashtagler dahil).
-            3. 'muzik_turu': Bu videonun moduna uygun tek kelimelik İNGİLİZCE bir müzik türü (örn: upbeat, chill, lofi, cinematic, epic, vlog).
 
-            Çıktıyı SADECE geçerli bir JSON formatında ver.
+
+☐ Teknik bilgi dengesi: Gövdede her 3 cümleden 2'si teknik bilgi, 1'i samimi yorum (Bölüm 4.1)
+"""
+            
+            # Sistemi JSON'a zorlayan Arka Plan Komutu
+            system_prompt = BENIM_GEM_KURALLARIM + """
+            
+            ÖNEMLİ SİSTEM TALİMATI: 
+            Yukarıdaki otoXtra kurallarına GÖRE üretim yap. Ancak bu içeriği bir web uygulamasında ayrıştıracağım için çıktıyı SADECE VE SADECE aşağıdaki formatta geçerli bir JSON olarak ver. Başka hiçbir şey yazma.
+            {
+              "seslendirme_metni": "4 vuruş yapısına uygun seslendirme metni (TTS için)",
+              "reels_aciklamasi": "Katmanlı açıklama ve etiketler kısmı (tamamı birleşik, boşluk kurallarına uyarak)",
+              "kapak_basliklari": "5 farklı kapak başlığı alternatifinin tamamı (alt alta yazı formatında)",
+              "alt_metin": "Instagram için 1 cümlelik alt metin",
+              "muzik_turu": "Bu videonun moduna uygun tek kelimelik İNGİLİZCE arka plan müzik türü (örn: phonk, drift, hiphop, action, cinematic, phonk drift)"
+            }
             """
             
             # 1. ADIM: METİN ÜRETİMİ
@@ -1481,13 +1483,12 @@ Her çıktıda şu kontrolleri yap:
             
             veri = json.loads(response.text)
             
-            # 2. ADIM: AI STUDIO SES ÜRETİMİ (AUTONOE vb.)
-            secilen_ses_ingilizce = ses_secimi.split(" ")[0] # Sadece ismini alır (Örn: "Autonoe")
-            ses_dosyasi = "seslendirme.wav" # Artık MP3 değil, stüdyo kalitesi WAV!
+            # 2. ADIM: AI STUDIO SES ÜRETİMİ
+            secilen_ses_ingilizce = ses_secimi.split(" ")[0]
+            ses_dosyasi = "seslendirme.wav"
             ses_basarili = False
             
             try:
-                # Gemini'ye "Bunu şu sesle oku" talimatı gönderiyoruz
                 tts_response = client.models.generate_content(
                     model='gemini-2.5-flash',
                     contents=veri["seslendirme_metni"],
@@ -1503,7 +1504,6 @@ Her çıktıda şu kontrolleri yap:
                     )
                 )
 
-                # Gelen sesi kullanılabilir .wav dosyasına dönüştürme
                 audio_data = tts_response.candidates[0].content.parts[0].inline_data.data
                 with wave.open(ses_dosyasi, "wb") as wf:
                     wf.setnchannels(1)
@@ -1533,66 +1533,49 @@ Her çıktıda şu kontrolleri yap:
                         with open(muzik_dosyasi, "wb") as f:
                             f.write(muzik_indir.content)
                         muzik_basarili = True
-            except Exception as e:
+            except Exception:
                 pass
 
-            # 4. ADIM: SONUÇLARI GÖSTER
-            st.success("✅ İçerik Başarıyla Oluşturuldu!")
+            # 4. ADIM: SONUÇLARI GÖSTER (otoXtra Özel Tasarımı)
+            st.success("✅ otoXtra İçeriği Başarıyla Üretti!")
             
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.subheader("📝 Reels Açıklaması")
-                st.text_area("Bunu kopyala:", veri["reels_aciklamasi"], height=150)
-                
-                st.subheader("💡 Seçilen Müzik Türü")
-                st.info(f"Tavsiye edilen tarz: **{veri['muzik_turu'].upper()}**")
-
-            with col2:
-                st.subheader("🎙️ Seslendirme")
+            # Üst Kısım: Medyalar (Ses ve Müzik)
+            st.markdown("### 🎧 Medya Dosyaları")
+            mcol1, mcol2 = st.columns(2)
+            with mcol1:
+                st.markdown("**🎙️ Seslendirme (AI Studio)**")
                 if ses_basarili:
                     st.audio(ses_dosyasi)
                     with open(ses_dosyasi, "rb") as f:
-                        st.download_button(f"⬇️ {secilen_ses_ingilizce} Sesini İndir", f, file_name="seslendirme.wav", mime="audio/wav")
-                
-                st.subheader("🎵 Arka Plan Müziği")
+                        st.download_button(f"⬇️ {secilen_ses_ingilizce} Sesini İndir (.wav)", f, file_name="seslendirme.wav", mime="audio/wav")
+            with mcol2:
+                st.markdown(f"**🎵 Arka Plan Müziği** (Öneri: *{veri['muzik_turu'].upper()}*)")
                 if muzik_basarili:
                     st.audio(muzik_dosyasi)
                     with open(muzik_dosyasi, "rb") as file:
-                        st.download_button("⬇️ Müziği İndir", file, file_name="muzik.mp3", mime="audio/mp3")
+                        st.download_button("⬇️ Müziği İndir (.mp3)", file, file_name="muzik.mp3", mime="audio/mp3")
                 else:
-                    st.warning("Uygun müzik otomatik indirilemedi.")
-
-        except Exception as e:
-            st.error("Sistemde bir hata oluştu ve işlem tamamlanamadı.")
-            st.code(f"Hata Detayı: {str(e)}")
-
-                st.warning(f"Müzik aranırken ufak bir sorun oldu: {str(e)}")
-
-            st.success("✅ İçerik Başarıyla Oluşturuldu!")
+                    st.warning("Uygun müzik bulunamadı.")
             
+            st.divider()
+
+            # Alt Kısım: Metinler (otoXtra Çıktıları)
+            st.markdown("### 📝 otoXtra Metin İçerikleri")
             col1, col2 = st.columns(2)
             
             with col1:
-                st.subheader("📝 Reels Açıklaması")
-                st.text_area("Bunu kopyala:", veri["reels_aciklamasi"], height=150)
+                st.subheader("1️⃣ Reels Açıklaması (Caption & Etiketler)")
+                st.text_area("Direkt kopyalayıp yapıştırabilirsin:", veri["reels_aciklamasi"], height=250)
                 
-                st.subheader("💡 Seçilen Müzik Türü")
-                st.info(f"Tavsiye edilen tarz: **{veri['muzik_turu'].upper()}**")
+                st.subheader("3️⃣ Alt Metin (Gelişmiş Ayarlar)")
+                st.code(veri["alt_metin"], language="text")
 
             with col2:
-                st.subheader("🎙️ Seslendirme")
-                st.audio(ses_dosyasi)
-                with open(ses_dosyasi, "rb") as f:
-                    st.download_button("⬇️ Seslendirmeyi İndir", f, file_name="seslendirme.mp3", mime="audio/mp3")
+                st.subheader("2️⃣ Kapak Başlığı Alternatifleri")
+                st.text_area("Videoya eklenecek metinler:", veri["kapak_basliklari"], height=250)
                 
-                st.subheader("🎵 Arka Plan Müziği")
-                if muzik_basarili:
-                    st.audio(muzik_dosyasi)
-                    with open(muzik_dosyasi, "rb") as file:
-                        st.download_button("⬇️ Müziği İndir", file, file_name="muzik.mp3", mime="audio/mp3")
-                else:
-                    st.warning("Uygun müzik otomatik indirilemedi.")
+                st.subheader("🎙️ Seslendirme Metni (Kontrol İçin)")
+                st.info(veri["seslendirme_metni"])
 
         except Exception as e:
             st.error("Sistemde bir hata oluştu ve işlem tamamlanamadı.")
