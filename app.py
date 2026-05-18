@@ -2,9 +2,8 @@ import streamlit as st
 from google import genai
 from google.genai import types
 import json
-import edge_tts
-import asyncio
 import requests
+import wave
 
 # Sayfa ayarları
 st.set_page_config(page_title="Reels Asistanım", page_icon="🎬", layout="centered")
@@ -12,7 +11,7 @@ st.set_page_config(page_title="Reels Asistanım", page_icon="🎬", layout="cent
 st.title("🎬 Otomatik Reels Asistanı")
 st.write("Videonun konusunu yaz; seslendirmeni, açıklamanı ve videoya uygun müziği anında al!")
 
-# 1. API ŞİFRELERİNİ OTOMATİK ÇEKME (STREAMLIT SECRETS'TAN)
+# API Şifrelerini Gizli Kasadan Çekme
 try:
     gemini_key = st.secrets["GEMINI_API_KEY"]
     pixabay_key = st.secrets["PIXABAY_API_KEY"]
@@ -20,29 +19,36 @@ except Exception:
     st.error("🔑 API anahtarları bulunamadı! Lütfen Streamlit ayarlarından (Secrets) şifrelerinizi girin.")
     st.stop()
 
-# Sol menü - Artık şifre sormuyoruz, sadece ayar var
+# Sol menü - Harika Google AI Studio Sesleri!
 with st.sidebar:
-    st.header("⚙️ Ayarlar")
-    ses_secimi = st.selectbox("Seslendiren Seçimi", ["tr-TR-AhmetNeural (Erkek)", "tr-TR-EmelNeural (Kadın)"])
+    st.header("🎙️ AI Studio Sesleri")
+    ses_secimi = st.selectbox("Seslendiren Seçimi", [
+        "Autonoe (Parlak ve Canlı - Kadın)",
+        "Aoede (Havadar ve Yumuşak - Kadın)",
+        "Callirrhoe (Rahat ve Doğal - Kadın)",
+        "Kore (Net ve Kendinden Emin - Kadın)",
+        "Leda (Genç ve Dinamik - Kadın)",
+        "Zephyr (Parlak - Kadın)",
+        "Puck (Eğlenceli ve Enerjik - Erkek)",
+        "Charon (Bilgilendirici - Erkek)",
+        "Orus (Net ve Sert - Erkek)",
+        "Iapetus (Temiz ve Akıcı - Erkek)",
+        "Umbriel (Rahat - Erkek)"
+    ])
 
 video_icerigi = st.text_area("Videoda ne var? Kısaca anlat:", height=150)
-
-def run_async(coroutine):
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    return loop.run_until_complete(coroutine)
 
 if st.button("🚀 Reels İçeriğini Üret!"):
     if not video_icerigi:
         st.warning("Lütfen videoda ne olduğunu yazın.")
         st.stop()
 
-    with st.spinner("Senaryo yazılıyor, seslendiriliyor ve müzik aranıyor..."):
+    with st.spinner("Senaryo yazılıyor, AI Studio sesi üretiliyor ve müzik aranıyor... (Bu biraz sürebilir)"):
         try:
             client = genai.Client(api_key=gemini_key)
             
             # =================================================================
-            # 2. BURAYA KENDİ GEM'İNİN KURALLARINI YAZACAKSIN
+            # BURAYA KENDİ GEM'İNİN KURALLARINI YAZACAKSIN
             # =================================================================
             BENIM_GEM_KURALLARIM = """
 # otoXtra — INSTAGRAM REELS İÇERİK ASİSTANI v3.1
@@ -1448,13 +1454,9 @@ Her çıktıda şu kontrolleri yap:
 
 
 ☐ Engagement bait: tüm çıktıda Bölüm 7 ihlali YOK
-
-
-☐ Teknik bilgi dengesi: Gövdede her 3 cümleden 2'si teknik bilgi, 1'i samimi yorum (Bölüm 4.1)
             """
-            # (Yukarıdaki tırnaklar arasına kendi orjinal Gem kurallarını kopyalayıp yapıştırabilirsin)
             
-            # Arka plan teknik talimatları (Burası çıktı formatını sağlar, buraya dokunma)
+            # Arka plan teknik talimatları (Burası çıktı formatını sağlar)
             system_prompt = f"""
             Aşağıdaki kurallara kesinlikle uymak zorundasın:
             {BENIM_GEM_KURALLARIM}
@@ -1467,6 +1469,7 @@ Her çıktıda şu kontrolleri yap:
             Çıktıyı SADECE geçerli bir JSON formatında ver.
             """
             
+            # 1. ADIM: METİN ÜRETİMİ
             response = client.models.generate_content(
                 model='gemini-2.5-flash',
                 contents=video_icerigi,
@@ -1478,15 +1481,42 @@ Her çıktıda şu kontrolleri yap:
             
             veri = json.loads(response.text)
             
-            secilen_ses = ses_secimi.split()[0]
-            ses_dosyasi = "seslendirme.mp3"
+            # 2. ADIM: AI STUDIO SES ÜRETİMİ (AUTONOE vb.)
+            secilen_ses_ingilizce = ses_secimi.split(" ")[0] # Sadece ismini alır (Örn: "Autonoe")
+            ses_dosyasi = "seslendirme.wav" # Artık MP3 değil, stüdyo kalitesi WAV!
+            ses_basarili = False
             
-            async def tts_olustur():
-                communicate = edge_tts.Communicate(veri["seslendirme_metni"], secilen_ses)
-                await communicate.save(ses_dosyasi)
+            try:
+                # Gemini'ye "Bunu şu sesle oku" talimatı gönderiyoruz
+                tts_response = client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=veri["seslendirme_metni"],
+                    config=types.GenerateContentConfig(
+                        response_modalities=["AUDIO"],
+                        speech_config=types.SpeechConfig(
+                            voice_config=types.VoiceConfig(
+                                prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                                    voice_name=secilen_ses_ingilizce
+                                )
+                            )
+                        )
+                    )
+                )
+
+                # Gelen sesi kullanılabilir .wav dosyasına dönüştürme
+                audio_data = tts_response.candidates[0].content.parts[0].inline_data.data
+                with wave.open(ses_dosyasi, "wb") as wf:
+                    wf.setnchannels(1)
+                    wf.setsampwidth(2)
+                    wf.setframerate(24000)
+                    wf.writeframes(audio_data)
                 
-            run_async(tts_olustur())
+                ses_basarili = True
+            except Exception as ses_hata:
+                st.warning("Google Ses Sisteminde bir yoğunluk veya hata oldu.")
+                st.code(str(ses_hata))
             
+            # 3. ADIM: MÜZİK BULMA
             muzik_dosyasi = "muzik.mp3"
             muzik_basarili = False
             
@@ -1504,6 +1534,39 @@ Her çıktıda şu kontrolleri yap:
                             f.write(muzik_indir.content)
                         muzik_basarili = True
             except Exception as e:
+                pass
+
+            # 4. ADIM: SONUÇLARI GÖSTER
+            st.success("✅ İçerik Başarıyla Oluşturuldu!")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.subheader("📝 Reels Açıklaması")
+                st.text_area("Bunu kopyala:", veri["reels_aciklamasi"], height=150)
+                
+                st.subheader("💡 Seçilen Müzik Türü")
+                st.info(f"Tavsiye edilen tarz: **{veri['muzik_turu'].upper()}**")
+
+            with col2:
+                st.subheader("🎙️ Seslendirme")
+                if ses_basarili:
+                    st.audio(ses_dosyasi)
+                    with open(ses_dosyasi, "rb") as f:
+                        st.download_button(f"⬇️ {secilen_ses_ingilizce} Sesini İndir", f, file_name="seslendirme.wav", mime="audio/wav")
+                
+                st.subheader("🎵 Arka Plan Müziği")
+                if muzik_basarili:
+                    st.audio(muzik_dosyasi)
+                    with open(muzik_dosyasi, "rb") as file:
+                        st.download_button("⬇️ Müziği İndir", file, file_name="muzik.mp3", mime="audio/mp3")
+                else:
+                    st.warning("Uygun müzik otomatik indirilemedi.")
+
+        except Exception as e:
+            st.error("Sistemde bir hata oluştu ve işlem tamamlanamadı.")
+            st.code(f"Hata Detayı: {str(e)}")
+
                 st.warning(f"Müzik aranırken ufak bir sorun oldu: {str(e)}")
 
             st.success("✅ İçerik Başarıyla Oluşturuldu!")
