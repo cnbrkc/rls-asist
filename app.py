@@ -41,8 +41,6 @@ with st.sidebar:
         "Iapetus (Temiz ve Akıcı - Erkek)",
         "Umbriel (Rahat - Erkek)"
     ])
-
-@@ -122,77 +126,117 @@ if st.button("🚀 otoXtra İçeriğini Üret!"):
                     
                     ses_basarili = True
                     break # Başarılı olursa döngüden çık
