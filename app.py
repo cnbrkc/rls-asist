@@ -5,6 +5,7 @@ import json
 import requests
 import wave
 import os
+import time  # Google meşgulse beklemek için yeni ekledik
 
 # Sayfa ayarları
 st.set_page_config(page_title="otoXtra Asistanım", page_icon="🏎️", layout="wide")
@@ -44,7 +45,7 @@ if st.button("🚀 otoXtra İçeriğini Üret!"):
         st.warning("Lütfen videoda ne olduğunu yazın.")
         st.stop()
 
-    with st.spinner("otoXtra senaryoyu yazıyor, AI Studio sesi üretiliyor ve müzik aranıyor... (15-20 saniye)"):
+    with st.spinner("otoXtra içerik üretiyor... (Google sunucuları yoğunsa bu işlem 30 sn sürebilir)"):
         try:
             client = genai.Client(api_key=gemini_key)
             
@@ -53,7 +54,7 @@ if st.button("🚀 otoXtra İçeriğini Üret!"):
                 with open("kurallar.txt", "r", encoding="utf-8") as f:
                     BENIM_GEM_KURALLARIM = f.read()
             except FileNotFoundError:
-                st.error("⚠️ 'kurallar.txt' dosyası bulunamadı! Lütfen GitHub deponuza bu isimde bir dosya ekleyip içine promptunuzu yapıştırın.")
+                st.error("⚠️ 'kurallar.txt' dosyası bulunamadı! Lütfen GitHub deponuza bu isimde bir dosya ekleyin.")
                 st.stop()
             
             system_prompt = BENIM_GEM_KURALLARIM + """
@@ -69,58 +70,73 @@ if st.button("🚀 otoXtra İçeriğini Üret!"):
             }
             """
             
-            # 2. METİN ÜRETİMİ (Standart Flash modeli)
-            response = client.models.generate_content(
-                model='gemini-2.5-flash',
-                contents=video_icerigi,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_prompt,
-                    response_mime_type="application/json", 
-                )
-            )
+            # 2. METİN ÜRETİMİ (Hata verirse 3 kez dener)
+            veri = None
+            for deneme in range(3):
+                try:
+                    response = client.models.generate_content(
+                        model='gemini-2.5-flash',
+                        contents=video_icerigi,
+                        config=types.GenerateContentConfig(
+                            system_instruction=system_prompt,
+                            response_mime_type="application/json", 
+                        )
+                    )
+                    veri = json.loads(response.text)
+                    break # Başarılı olursa döngüden çık
+                except Exception as e:
+                    if "503" in str(e) and deneme < 2:
+                        time.sleep(3) # 3 saniye bekle tekrar dene
+                        continue
+                    else:
+                        raise e # Artık mecburen hatayı ver
             
-            veri = json.loads(response.text)
-            
-            # 3. AI STUDIO SES ÜRETİMİ (ÖZEL TTS MODELİ KULLANILDI!)
+            # 3. AI STUDIO SES ÜRETİMİ (Hata verirse 3 kez dener)
             secilen_ses_ingilizce = ses_secimi.split(" ")[0]
             ses_dosyasi = "seslendirme.wav"
             ses_basarili = False
             
-            try:
-                # DİKKAT: Buradaki model ismini Google'ın SADECE ses üreten özel TTS modeline çevirdik.
-                tts_response = client.models.generate_content(
-                    model='gemini-2.5-flash-preview-tts', # Veya çalışmazsa: 'gemini-3.1-flash-tts-preview'
-                    contents=veri["seslendirme_metni"],
-                    config=types.GenerateContentConfig(
-                        response_modalities=["AUDIO"],
-                        speech_config=types.SpeechConfig(
-                            voice_config=types.VoiceConfig(
-                                prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                                    voice_name=secilen_ses_ingilizce
+            for deneme in range(3):
+                try:
+                    tts_response = client.models.generate_content(
+                        model='gemini-2.5-flash-preview-tts',
+                        contents=veri["seslendirme_metni"],
+                        config=types.GenerateContentConfig(
+                            response_modalities=["AUDIO"],
+                            speech_config=types.SpeechConfig(
+                                voice_config=types.VoiceConfig(
+                                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                                        voice_name=secilen_ses_ingilizce
+                                    )
                                 )
                             )
                         )
                     )
-                )
 
-                audio_data = tts_response.candidates[0].content.parts[0].inline_data.data
-                with wave.open(ses_dosyasi, "wb") as wf:
-                    wf.setnchannels(1)
-                    wf.setsampwidth(2)
-                    wf.setframerate(24000)
-                    wf.writeframes(audio_data)
-                
-                ses_basarili = True
-            except Exception as ses_hata:
-                st.warning("Google Ses Sisteminde bir hata oldu (Model izni hatası olabilir).")
-                st.code(str(ses_hata))
+                    audio_data = tts_response.candidates[0].content.parts[0].inline_data.data
+                    with wave.open(ses_dosyasi, "wb") as wf:
+                        wf.setnchannels(1)
+                        wf.setsampwidth(2)
+                        wf.setframerate(24000)
+                        wf.writeframes(audio_data)
+                    
+                    ses_basarili = True
+                    break # Başarılı olursa döngüden çık
+                except Exception as ses_hata:
+                    if "503" in str(ses_hata) and deneme < 2:
+                        time.sleep(4) # 4 saniye dinlenip tekrar Google'a istek atar
+                        continue
+                    else:
+                        if deneme == 2:
+                            st.warning("Google Ses Sistemleri şu an aşırı yoğun. Ses üretilemedi, lütfen 1-2 dakika sonra tekrar üretime bas.")
+                            st.code(str(ses_hata))
+                        break
             
-            # 4. MÜZİK BULMA (Daha akıllı arama)
+            # 4. MÜZİK BULMA
             muzik_dosyasi = "muzik.mp3"
             muzik_basarili = False
             
             try:
-                # Çoklu kelime gelirse sadece ilk kelimeyi alır (örn: 'phonk drift' -> 'phonk')
                 arama_kelimesi = veri.get('muzik_turu', 'upbeat').strip().split()[0]
                 
                 params = {"key": pixabay_key, "q": arama_kelimesi, "per_page": 5}
