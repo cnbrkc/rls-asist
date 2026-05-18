@@ -40,7 +40,7 @@ if st.button("🚀 Reels İçeriğini Üret!"):
 
     with st.spinner("Senaryo yazılıyor, seslendiriliyor ve müzik aranıyor... (Bu işlem 10-15 saniye sürebilir)"):
         try:
-            # 1. GEMINI İLE İÇERİK ÜRETİMİ
+            # 1. GEMINI İLE İÇERİK ÜRETİMİ (MODEL GÜNCELLENDİ)
             client = genai.Client(api_key=gemini_key)
             system_prompt = """Sen uzman bir sosyal medya danışmanı ve Reels metin yazarısın. 
 Kullanıcının verdiği video fikrine göre şunları oluştur:
@@ -50,16 +50,17 @@ Kullanıcının verdiği video fikrine göre şunları oluştur:
 
 Çıktıyı SADECE geçerli bir JSON formatında ver."""
             
+            # BURADAKİ MODEL İSMİNİ "gemini-2.5-flash" OLARAK GÜNCELLEDİK
             response = client.models.generate_content(
-                model='gemini-1.5-flash',
+                model='gemini-2.5-flash',
                 contents=video_icerigi,
                 config=types.GenerateContentConfig(
                     system_instruction=system_prompt,
-                    response_mime_type="application/json", # BU YENİ: Gemini'yi direkt JSON vermeye zorlar, hata riskini sıfırlar.
+                    response_mime_type="application/json", 
                 )
             )
             
-            # Gelen cevabı direkt okuyoruz (temizlemeye gerek kalmadı)
+            # Gelen cevabı direkt okuyoruz
             veri = json.loads(response.text)
             
             # 2. SESLENDİRME (METİNDEN SESE)
@@ -119,6 +120,5 @@ Kullanıcının verdiği video fikrine göre şunları oluştur:
                     st.warning("Uygun müzik otomatik indirilemedi. Lütfen Pixabay'dan manuel seçin.")
 
         except Exception as e:
-            # BU KISIM ÇOK ÖNEMLİ: Hatayı gizlemek yerine ekrana yazdırıyoruz!
             st.error("Sistemde bir hata oluştu ve işlem tamamlanamadı.")
-            st.code(f"Hata Detayı: {str(e)}") # Artık gizli kalmayacak
+            st.code(f"Hata Detayı: {str(e)}")
