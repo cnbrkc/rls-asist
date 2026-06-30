@@ -172,6 +172,40 @@ def ses_uret(client, model_listesi, metin, ses_adi, cikti_dosyasi, log_ekle):
 # SAYFA AYARLARI
 # ------------------------------------------------------------
 st.set_page_config(page_title="otoXtra Asistanım", page_icon="🏎️", layout="wide")
+
+# ------------------------------------------------------------
+# MOBİL / MİNİMALİST GÖRÜNÜM AYARLARI
+# - Kutulardaki uzun metinler artık satıra sarıyor (mobilde "havada
+#   uçuşan" / kutu dışına taşan yazı sorunu burada çözülüyor).
+# - Küçük ekranlarda kenar boşlukları ve başlık boyutu küçültülüyor.
+# - Küçük ekranda butonlar tam genişlik oluyor (parmakla basmak kolaylaşır).
+# ------------------------------------------------------------
+st.markdown(
+    """
+    <style>
+    pre, code {
+        white-space: pre-wrap !important;
+        word-break: break-word !important;
+        overflow-wrap: anywhere !important;
+    }
+    @media (max-width: 640px) {
+        .block-container {
+            padding-left: 0.9rem;
+            padding-right: 0.9rem;
+            padding-top: 1.2rem;
+        }
+        h2, h3 {
+            font-size: 1.05rem !important;
+        }
+        .stButton button {
+            width: 100%;
+        }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 st.subheader("🏎️ otoXtra — Otomatik Reels Asistanı")
 st.caption("Videonun konusunu, süresini ve varsa özel notunu yaz; otoXtra gerisini halletsin!")
 
