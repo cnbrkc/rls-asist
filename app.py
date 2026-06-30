@@ -5,8 +5,9 @@ import json
 import os
 import re
 import time
+import traceback
 import wave
- 
+
 # ============================================================
 # otoXtra — Otomatik Reels Asistanı
 # AŞAMA 1 GÜNCELLEMESİ:
@@ -19,8 +20,8 @@ import wave
 #      ikonu eklendi (st.code kutularının sağ üstünde otomatik çıkar)
 #   7) Gereksiz "Alt Metin" alanı tamamen kaldırıldı
 # ============================================================
- 
- 
+
+
 # ------------------------------------------------------------
 # MODEL LİSTELERİ (öncelik sırasına göre: en güçlü -> en garanti)
 # Google modellerin isimlerini zaman zaman değiştiriyor / kapatıyor.
@@ -35,32 +36,32 @@ METIN_MODELLERI = [
     "gemini-2.5-pro",          # önceki üst seviye model
     "gemini-2.5-flash",        # ŞU AN KULLANDIĞIMIZ — garanti çalışan ana yedek
 ]
- 
+
 SES_MODELLERI = [
     "gemini-2.5-pro-preview-tts",    # en yüksek ses kalitesi (yeni, birincil)
     "gemini-2.5-flash-preview-tts",  # ŞU AN KULLANDIĞIMIZ — garanti çalışan yedek
 ]
- 
- 
+
+
 # ------------------------------------------------------------
 # YARDIMCI FONKSİYONLAR
 # ------------------------------------------------------------
- 
+
 def markdown_temizle(metin: str) -> str:
     """Metnin içinden ** veya __ gibi kalın yazı işaretlerini siler.
     Hashtag (#) işaretlerine dokunmaz, açıklamadaki etiketler bozulmaz."""
     if not isinstance(metin, str):
         return ""
     return re.sub(r"\*\*|__", "", metin).strip()
- 
- 
+
+
 def kapak_basliklarini_formatla(liste) -> str:
     """AI'dan gelen kapak başlıkları listesini (ana/alt) numaralı,
     alt alta, tertemiz bir metne çevirir. Markdown işaretleri tamamen
     silinir, böylece kutuya yazarken **, (b) gibi çöp görünmez."""
     if not isinstance(liste, list) or not liste:
         return markdown_temizle(str(liste)) if liste else "(Kapak başlığı üretilemedi.)"
- 
+
     satirlar = []
     for i, secenek in enumerate(liste, start=1):
         if isinstance(secenek, dict):
@@ -73,8 +74,8 @@ def kapak_basliklarini_formatla(liste) -> str:
         else:
             satirlar.append(f"{i}) {ana}")
     return "\n\n".join(satirlar)
- 
- 
+
+
 def muzik_onerisini_formatla(muzik_onerisi) -> str:
     """Müzik önerisini (tarz + şarkı listesi) okunaklı bir metne çevirir."""
     if not isinstance(muzik_onerisi, dict):
@@ -87,8 +88,8 @@ def muzik_onerisini_formatla(muzik_onerisi) -> str:
     if not sarkilar:
         satirlar.append("(Şarkı önerisi üretilemedi.)")
     return "\n".join(satirlar)
- 
- 
+
+
 def metin_uret(client, model_listesi, video_icerigi, system_prompt, response_schema, log_ekle):
     """Listedeki modelleri sırayla dener. 503 (sunucu meşgul) hatasında aynı
     modeli bir kez daha dener; başka bir hatada (kota/izin/bulunamadı) hemen
@@ -121,8 +122,8 @@ def metin_uret(client, model_listesi, video_icerigi, system_prompt, response_sch
                     log_ekle(f"⚠️ {model_adi} kullanılamadı ({hata_metni[:90]}...) → sıradaki modele geçiliyor")
                     break
     raise son_hata if son_hata else Exception("Hiçbir model içerik üretemedi.")
- 
- 
+
+
 def ses_uret(client, model_listesi, metin, ses_adi, cikti_dosyasi, log_ekle):
     """Listedeki ses (TTS) modellerini sırayla dener. Sesler (Puck, Kore vb.)
     Google'a ait olduğu için model değişse de aynı kalır."""
@@ -165,15 +166,15 @@ def ses_uret(client, model_listesi, metin, ses_adi, cikti_dosyasi, log_ekle):
                     break
     log_ekle(f"❌ Hiçbir ses modeli başarılı olamadı. Son hata: {str(son_hata)[:90] if son_hata else 'yok'}")
     return False, None
- 
- 
+
+
 # ------------------------------------------------------------
 # SAYFA AYARLARI
 # ------------------------------------------------------------
 st.set_page_config(page_title="otoXtra Asistanım", page_icon="🏎️", layout="wide")
-st.title("🏎️ otoXtra — Otomatik Reels Asistanı")
-st.write("Videonun konusunu, tahmini süresini ve varsa özel notunu yaz; otoXtra gerisini halletsin!")
- 
+st.subheader("🏎️ otoXtra — Otomatik Reels Asistanı")
+st.caption("Videonun konusunu, süresini ve varsa özel notunu yaz; otoXtra gerisini halletsin!")
+
 # ------------------------------------------------------------
 # UYGULAMA DURUMU (sayfa yenilenince sonuçlar ve günlük kaybolmasın)
 # ------------------------------------------------------------
@@ -181,7 +182,7 @@ if "sonuc" not in st.session_state:
     st.session_state.sonuc = None
 if "log_satirlari" not in st.session_state:
     st.session_state.log_satirlari = []
- 
+
 # ------------------------------------------------------------
 # API ŞİFRESİ (artık sadece Gemini anahtarı gerekiyor; Pixabay kaldırıldı)
 # ------------------------------------------------------------
@@ -190,7 +191,7 @@ try:
 except Exception:
     st.error("🔑 GEMINI_API_KEY bulunamadı! Lütfen Streamlit ayarlarından (Secrets) anahtarınızı girin.")
     st.stop()
- 
+
 # ------------------------------------------------------------
 # SOL MENÜ - SES SEÇİMİ
 # ------------------------------------------------------------
@@ -209,7 +210,7 @@ with st.sidebar:
         "Iapetus (Temiz ve Akıcı - Erkek)",
         "Umbriel (Rahat - Erkek)"
     ])
- 
+
     with st.expander("ℹ️ Hangi modeller deneniyor?"):
         st.caption("Metin üretimi (sırayla denenir):")
         for m in METIN_MODELLERI:
@@ -217,46 +218,67 @@ with st.sidebar:
         st.caption("Seslendirme (sırayla denenir):")
         for m in SES_MODELLERI:
             st.caption(f"• {m}")
- 
-video_icerigi = st.text_area(
-    "Videonun konusunu, tahmini süresini (örn: 30 sn) ve varsa özel isteklerini yaz:",
-    height=150,
+
+konu_akisi = st.text_area(
+    "🎬 Videonun konusu / akışı",
+    height=130,
+    placeholder="Örn: Bu video Togg T10X'in fiyatını ve donanımını anlatıyor, sonunda Tucson ile karşılaştırıyor...",
 )
- 
+
+sc1, sc2 = st.columns([1, 3])
+with sc1:
+    sure_saniye = st.number_input("⏱️ Süre (saniye)", min_value=5, max_value=180, value=30, step=5)
+
+ek_istekler = st.text_area(
+    "✨ Ek istekler (opsiyonel)",
+    height=80,
+    placeholder="Örn: hook'ta fiyat vurgusu olsun, kapanışta soru sor... (boş bırakabilirsin)",
+)
+
+video_icerigi = (
+    f"Video konusu / akışı: {konu_akisi}\n"
+    f"Video süresi: {sure_saniye} saniye\n"
+    f"Özel istekler: {ek_istekler.strip() if ek_istekler.strip() else 'Yok'}"
+)
+
 buton_tiklandi = st.button("🚀 otoXtra İçeriğini Üret!")
- 
+
 # ------------------------------------------------------------
 # ÜRETİM SÜRECİ KUTUSU — her adım buraya yazılır, üretim bitince
 # kaybolmaz, butonun hemen altında sabit kalır.
 # ------------------------------------------------------------
 log_kutusu = st.empty()
- 
- 
+
+
 def gunlugu_ciz():
     if st.session_state.log_satirlari:
         log_kutusu.code("\n".join(st.session_state.log_satirlari), language=None)
     else:
         log_kutusu.empty()
- 
- 
+
+
 def log_ekle(satir: str):
     st.session_state.log_satirlari.append(satir)
     gunlugu_ciz()
- 
- 
+
+
 gunlugu_ciz()  # sayfa her yenilendiğinde son günlüğü göster
- 
+st.caption(
+    "🐛 Bir sorun/hata görürsen bu kutunun tamamını (sağ üstteki kopyalama ikonuyla) "
+    "kopyalayıp doğrudan Claude'a yapıştırman yeterli — orada ne olduğunu anlayıp düzeltirim."
+)
+
 if buton_tiklandi:
-    if not video_icerigi:
-        st.warning("Lütfen videoda ne olduğunu yazın.")
+    if not konu_akisi.strip():
+        st.warning("Lütfen videonun konusunu/akışını yazın.")
         st.stop()
- 
+
     st.session_state.log_satirlari = []
     log_ekle("🚀 Üretim başladı...")
- 
+
     try:
         client = genai.Client(api_key=gemini_key)
- 
+
         # 1. KURALLARI TXT DOSYASINDAN OKUMA
         try:
             with open("kurallar.txt", "r", encoding="utf-8") as f:
@@ -264,14 +286,14 @@ if buton_tiklandi:
         except FileNotFoundError:
             st.error("⚠️ 'kurallar.txt' dosyası bulunamadı! Lütfen GitHub deponuza bu isimde bir dosya ekleyin.")
             st.stop()
- 
+
         system_prompt = BENIM_GEM_KURALLARIM + """
- 
+
 ÖNEMLİ SİSTEM TALİMATI (otoXtra Uygulaması):
 Yukarıdaki otoXtra kurallarına (ton, vuruş yapısı, caption katmanları, hashtag kuralları vb.) GÖRE üretim yap.
 Ancak NİHAİ ÇIKTIYI, yukarıdaki "ÇIKTI FORMATI" bölümündeki ham metin/markdown gösterimi DEĞİL, sadece
 aşağıda tanımlanan JSON alanlarına göre ver:
- 
+
 - seslendirme_metni: 4 vuruş yapısına uygun, TTS motoruna gidecek seslendirme metni. Düz metin, markdown KULLANMA.
 - reels_aciklamasi: Katmanlı Instagram açıklaması + en sonda 5 hashtag (tek bütün metin). Markdown KULLANMA
   (yalnızca caption'a ait #etiketler kalabilir, onlar hashtag'dir, markdown değildir).
@@ -282,10 +304,10 @@ aşağıda tanımlanan JSON alanlarına göre ver:
   cinematic) ve Instagram/Threads "Edits" uygulamasının müzik kütüphanesinde bulunma ihtimali yüksek,
   GERÇEKTEN VAR OLAN 3 adet şarkı önerisi ver ("sarki_onerileri" listesi, format: "Şarkı Adı - Sanatçı").
   Bunlar indirilecek dosyalar değil, sadece kullanıcının Instagram Edits içinde arayıp ekleyeceği öneriler.
- 
+
 alt_metin alanı İSTENMİYOR, üretme.
 """
- 
+
         response_schema = {
             "type": "OBJECT",
             "properties": {
@@ -316,22 +338,22 @@ alt_metin alanı İSTENMİYOR, üretme.
             },
             "required": ["seslendirme_metni", "reels_aciklamasi", "kapak_basliklari", "muzik_onerisi"],
         }
- 
+
         # 2. METİN ÜRETİMİ (model listesini otomatik sırayla dener)
         veri, kullanilan_metin_modeli = metin_uret(
             client, METIN_MODELLERI, video_icerigi, system_prompt, response_schema, log_ekle
         )
- 
+
         # 3. SES ÜRETİMİ (model listesini otomatik sırayla dener)
         secilen_ses_ingilizce = ses_secimi.split(" ")[0]
         ses_dosyasi = "seslendirme.wav"
         ses_basarili, kullanilan_ses_modeli = ses_uret(
             client, SES_MODELLERI, veri["seslendirme_metni"], secilen_ses_ingilizce, ses_dosyasi, log_ekle
         )
- 
+
         log_ekle("🎵 Müzik önerisi içerikle birlikte üretildi.")
         log_ekle("🏁 Tüm işlem tamamlandı.")
- 
+
         # Sonucu state'e al (sayfa yeniden çizilse bile içerik kalsın)
         st.session_state.sonuc = {
             "veri": veri,
@@ -341,12 +363,13 @@ alt_metin alanı İSTENMİYOR, üretme.
             "kullanilan_metin_modeli": kullanilan_metin_modeli,
             "kullanilan_ses_modeli": kullanilan_ses_modeli,
         }
- 
-    except Exception as e:
-        log_ekle(f"❌ Hata: {str(e)[:150]}")
-        st.error("Sistemde bir hata oluştu ve işlem tamamlanamadı.")
-        st.code(f"Hata Detayı: {str(e)}")
- 
+
+    except Exception:
+        hata_detay = traceback.format_exc()
+        log_ekle("❌ HATA OLUŞTU — işlem tamamlanamadı. Aşağıdaki tüm kutuyu kopyalayıp Claude'a gönderebilirsin:")
+        log_ekle(hata_detay)
+        st.error("Sistemde bir hata oluştu. Yukarıdaki süreç kutusunun tamamını kopyalayıp bana gönderirsen hemen bakarım.")
+
 # ------------------------------------------------------------
 # 4. SONUÇLARI GÖSTER (state varsa ekranda sabit kalsın)
 # ------------------------------------------------------------
@@ -358,19 +381,19 @@ if st.session_state.sonuc:
     secilen_ses_ingilizce = sonuc["secilen_ses_ingilizce"]
     kullanilan_metin_modeli = sonuc.get("kullanilan_metin_modeli", "?")
     kullanilan_ses_modeli = sonuc.get("kullanilan_ses_modeli", "?")
- 
+
     st.success(f"✅ otoXtra İçeriği Başarıyla Üretti! (Metin: {kullanilan_metin_modeli})")
- 
+
     c1, c2 = st.columns([3, 1])
     with c2:
         if st.button("🔄 Yeniden Sorgu (Temizle)"):
             st.session_state.sonuc = None
             st.session_state.log_satirlari = []
             st.rerun()
- 
+
     st.markdown("### 🎧 Medya Dosyaları")
     mcol1, mcol2 = st.columns(2)
- 
+
     with mcol1:
         st.markdown(f"**🎙️ Seslendirme** (model: {kullanilan_ses_modeli})")
         if ses_basarili and os.path.exists(ses_dosyasi):
@@ -382,27 +405,25 @@ if st.session_state.sonuc:
                 )
         else:
             st.warning("Ses dosyası bulunamadı. Lütfen tekrar üretin.")
- 
+
     with mcol2:
         st.markdown("**🎵 Müzik Önerisi** (Instagram Edits'te ara ve ekle)")
         muzik_metni = muzik_onerisini_formatla(veri.get("muzik_onerisi"))
         st.code(muzik_metni, language=None)
- 
+
     st.divider()
     st.markdown("### 📝 otoXtra Metin İçerikleri")
     col1, col2 = st.columns(2)
- 
+
     with col1:
         st.subheader("1️⃣ Reels Açıklaması (Caption & Etiketler)")
         st.caption("Kutunun sağ üst köşesindeki ikonla direkt kopyalayabilirsin.")
         st.code(markdown_temizle(veri.get("reels_aciklamasi", "")), language=None)
- 
+
     with col2:
         st.subheader("2️⃣ Kapak Başlığı Alternatifleri")
         st.caption("Kutunun sağ üst köşesindeki ikonla direkt kopyalayabilirsin.")
         st.code(kapak_basliklarini_formatla(veri.get("kapak_basliklari")), language=None)
- 
+
     with st.expander("🎙️ Seslendirme Metni (kontrol için)"):
         st.code(markdown_temizle(veri.get("seslendirme_metni", "")), language=None)
- 
-
