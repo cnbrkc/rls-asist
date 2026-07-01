@@ -10,19 +10,18 @@ import wave
 
 # ============================================================
 # otoXtra — Otomatik Reels Asistanı
-# AŞAMA 2 GÜNCELLEMESİ (VİDEO ANALİZİ ENTEGRASYONU):
-#   1) Viral referans video yükleme alanı eklendi.
-#   2) Gemini'ye videoyu izletip Türk izleyicisi için "viral DNA" analizi
-#      yaptıran özel bir prompt ve fonksiyon eklendi.
-#   3) Video analizi için en güncel modeller (2.5 Pro/Flash) listeye alındı.
-#   4) Manuel metin girişi ile video analizi aynı anda çalışabilir hale getirildi.
-#   5) Ücretsiz API limiti (20MB) için otomatik boyut kontrolü eklendi.
+# AŞAMA 3 GÜNCELLEMESİ:
+#   1) Süre mantığı güncellendi: AI orijinal video süresini IGNOR EDER.
+#      Sadece kullanıcının girdiği süreyi baz alıp "video hızlandırılmış"
+#      varsayımıyla o saniyeye uygun kelime sayısında metin yazar.
+#   2) Video analiz promptu "Türkiye'de Viral Stratejist" moduna alındı.
+#      Hook (kanca) önerileri ve izleyiciyi tutacak yerel detaylar isteniyor.
+#   3) "Ek istekler" kutusu kaldırıldı. Tek bir büyük metin kutusu var.
+#      İlk kısım konu, alt kısımlar özel istekler olarak AI'a iletiliyor.
+#   4) Müzik önerileri SADECE TELİFSİZ (Royalty-Free) olacak şekilde
+#      sistem promptuna kesin kurallar eklendi.
 # ============================================================
 
-
-# ------------------------------------------------------------
-# MODEL LİSTELERİ (öncelik sırasına göre: en güçlü -> en garanti)
-# ------------------------------------------------------------
 METIN_MODELLERI = [
     "gemini-3.1-pro-preview",   
     "gemini-3.5-flash",        
@@ -36,14 +35,12 @@ SES_MODELLERI = [
     "gemini-2.5-flash-preview-tts",  
 ]
 
-# YENİ: Video analizi için en güncel ve video desteği en güçlü modeller
 VIDEO_ANALIZ_MODELLERI = [
-    "gemini-2.5-pro",      # En güçlü video analizi ve Türkçe nüansları yakalama
-    "gemini-2.5-flash",    # Hızlı ve stabil video işleme
-    "gemini-1.5-pro",      # Eski ama video konusunda çok kanıtlanmış
-    "gemini-1.5-flash",    # Garantici yedek
+    "gemini-2.5-pro",      
+    "gemini-2.5-flash",    
+    "gemini-1.5-pro",      
+    "gemini-1.5-flash",    
 ]
-
 
 # ------------------------------------------------------------
 # YARDIMCI FONKSİYONLAR
@@ -54,11 +51,9 @@ def markdown_temizle(metin: str) -> str:
         return ""
     return re.sub(r"\*\*|__", "", metin).strip()
 
-
 def kapak_basliklarini_formatla(liste) -> str:
     if not isinstance(liste, list) or not liste:
         return markdown_temizle(str(liste)) if liste else "(Kapak başlığı üretilemedi.)"
-
     satirlar = []
     for i, secenek in enumerate(liste, start=1):
         if isinstance(secenek, dict):
@@ -72,19 +67,17 @@ def kapak_basliklarini_formatla(liste) -> str:
             satirlar.append(f"{i}) {ana}")
     return "\n\n".join(satirlar)
 
-
 def muzik_onerisini_formatla(muzik_onerisi) -> str:
     if not isinstance(muzik_onerisi, dict):
         return "(Müzik önerisi üretilemedi.)"
     tarz = markdown_temizle(str(muzik_onerisi.get("tarz", "")))
     sarkilar = muzik_onerisi.get("sarki_onerileri", []) or []
-    satirlar = [f"Tarz / Mod: {tarz}", ""]
+    satirlar = [f"Telifsiz Tarz / Mod: {tarz}", ""]
     for s in sarkilar:
         satirlar.append(f"- {markdown_temizle(str(s))}")
     if not sarkilar:
         satirlar.append("(Şarkı önerisi üretilemedi.)")
     return "\n".join(satirlar)
-
 
 def metin_uret(client, model_listesi, video_icerigi, system_prompt, response_schema, log_ekle):
     son_hata = None
@@ -115,7 +108,6 @@ def metin_uret(client, model_listesi, video_icerigi, system_prompt, response_sch
                     log_ekle(f"⚠️ {model_adi} kullanılamadı ({hata_metni[:90]}...) → sıradaki modele geçiliyor")
                     break
     raise son_hata if son_hata else Exception("Hiçbir model içerik üretemedi.")
-
 
 def ses_uret(client, model_listesi, metin, ses_adi, cikti_dosyasi, log_ekle):
     son_hata = None
@@ -153,33 +145,39 @@ def ses_uret(client, model_listesi, metin, ses_adi, cikti_dosyasi, log_ekle):
                     time.sleep(4)
                     continue
                 else:
-                    log_ekle(f"⚠️ {model_adi} ile ses üretilemedi ({hata_metni[:90]}...) → sıradaki modele geçiliyor")
+                    log_ekle(f"⚠️ {model_adi} ile ses üretilemedi ({hata_metni[:90]}) → sıradaki modele geçiliyor")
                     break
-    log_ekle(f"❌ Hiçbir ses modeli başarılı olamadı. Son hata: {str(son_hata)[:90] if son_hata else 'yok'}")
+    log_ekle(f"❌ Hiçbir ses modeli başarılı olamadı.")
     return False, None
 
-
-# YENİ: VİDEO ANALİZ FONKSİYONU
-def video_analiz_et(client, model_listesi, video_bytes, mime_type, log_ekle):
-    """Yüklenen videoyu Gemini'ye gönderip Türk izleyicisi için viral analiz yaptırır."""
+def video_analiz_et(client, model_listesi, video_bytes, mime_type, kullanici_notlari, log_ekle):
+    """Yüklenen videoyu Gemini'ye gönderip Türk izleyicisi için derinlemesine viral analiz yaptırır."""
     son_hata = None
-    # Videoyu Gemini'nin okuyabileceği formata (Part) çeviriyoruz
     video_part = types.Part.from_bytes(data=video_bytes, mime_type=mime_type)
     
-    # TÜRK İZLEYİCİSİ İÇİN ÖZEL GİZLİ PROMPT
-    analiz_promptu = """Sen Türkiye'de sosyal medya (Instagram Reels, TikTok, YouTube Shorts) algoritmalarını ve Türk izleyicisinin psikolojisini avucunun içi gibi bilen uzman bir viral strateistsin.
-Yüklediğim videoyu kare kare, sesiyle birlikte analiz et. Amacımız bu videodaki 'viral DNA'yı çekip çıkarmak ve Türkiye'de patlama yapacak benzer bir içerik üretmek.
-Bana şu başlıklarda detaylı rapor ver:
+    # KULLANICININ EK NOTLARI VARSA PROMPTA EKLENİYOR
+    ek_notlar_bolumu = ""
+    if kullanici_notlari.strip():
+        ek_notlar_bolumu = f"""
+        ÖNEMLİ: Kullanıcı videoyu analiz ettirirken sana şu EK İSTEKLERİ/ODAK NOKTALARINI iletti. 
+        Analizini yaparken bu istekleri MUTLAKA dikkate al ve videodaki ilgili detayları bu istekler ışığında değerlendir:
+        --- KULLANICININ EK İSTEKLERİ ---
+        {kullanici_notlari}
+        -------------------------------
+        """
 
-1. GÖRSEL AKIŞ & KURGU: Ekranda tam olarak ne görünüyor? Kamera açıları, geçişler, hızlandırma/yavaşlatma kullanımı nasıl? Türk izleyicisinin gözünü ekranda tutan görsel detaylar neler?
-2. İŞİTSEL & METİN İÇERİĞİ: Seslendirme veya ekrandaki yazılar ne anlatıyor? Temel bilgi veya argüman ne?
-3. VİRAL KANCASI (HOOK): Videonun ilk 3 saniyesinde izleyiciyi tutan şey ne? (Fiyat şoku, merak unsuru, tartışma yaratacak bir iddia, relatable bir dert vb.)
-4. TÜRK İZLEYİCİSİ İÇİN POTANSİYEL: Bu konunun Türkiye'de neden tutacağını analiz et. (Örn: Ekonomik durum, markalar arası rekabet, günlük hayatın içinden bir kesit, 'bizden biri' hissi, yerel mizah vb.)
-5. DUYGU VE TON: Video izleyicide hangi duyguyu uyandırıyor? (Gaza getirme, öfke, şaşkınlık, gülme, 'acaba?' dedirtme vb.)
+    analiz_promptu = f"""Sen Türkiye'de sosyal medya (Instagram Reels, TikTok, YouTube Shorts) algoritmalarını ve Türk izleyicisinin psikolojisini avucunun içi gibi bilen, 'viral DNA' çıkaran uzman bir strateistsin.
+Yüklediğim videoyu kare kare, sesiyle birlikte analiz et. Amacımız bu videodaki en çarpıcı detayları bulup Türkiye'de patlama yapacak bir kurgu stratejisi oluşturmak.
 
-ÖNEMLİ: Videodaki bilgiler (özellikle fiyat, model yılı, teknik özellik gibi) Türkiye piyasası için güncel değilse veya eksikse, lütfen kendi güncel Türkiye verilerinle (internet araştırması mantığıyla) bunları düzelt veya eksiklerini tamamla. 
+Bana şu başlıklarda çok net, maddeler halinde rapor ver:
 
-Bu bilgileri, bir sonraki adımda benim 'kurallar.txt' dosyamdaki formata göre seslendirme metni ve açıklama üretmen için bana ham veri olarak, maddeler halinde ve çok net bir özetle ver. Doğrudan analiz sonucunu yaz, ekstra konuşma yapma."""
+1. VİRAL DETAYLAR & TÜRK İZLEYİCİSİ KANCASI: Videoda Türk izleyicisinin gözünü durduracak, merak uyandıracak veya tartışma yaratacak spesifik detaylar neler? (Örn: Beklenmedik bir fiyat, rakip markayla acımasız bir kıyaslama, günlük hayattan sinir bozucu ama gerçek bir detay, 'bizden biri' hissi veren bir dert). Türkiye piyasası için güncel değilse veya eksikse kendi güncel verilerinle düzelt.
+2. KURGU & HIZLANDIRMA STRATEJİSİ: Kullanıcı bu videoyu kurgularken hızlandıracak/krıpacak. Videonun en vurucu 3-4 görsel anını (B-roll, yakın çekim, hızlanma anı) belirt ve "Seslendirme bu anlarda şu tempoda gitmeli" diye not düş.
+3. HOOK (GİRİŞ KANCASI) ÖNERİSİ: Videonun ilk 3 saniyesinde izleyiciyi tokat gibi çarpacak, 'kaydırma'yı durduracak o spesifik cümleyi veya görsel efekti öner. (Örn: "Bu arabayı almadan önce bu fiyatı görün...", "Hyundai bayisi bunu duyunca sinirlenecek ama...")
+4. KANIŞTIRICI KAPANIŞ (CTA/LOOP) ÖNERİSİ: Videonun son 3 saniyesinde izleyiciyi yorum yapmaya itecek veya videoyu tekrar izletmek için sonunu başına bağlayacak o kritik cümleyi öner.
+{ek_notlar_bolumu}
+
+Bu bilgileri, bir sonraki adımda benim 'kurallar.txt' dosyamdaki formata göre seslendirme metni üretmen için bana ham veri olarak ver. Doğrudan analiz sonucunu yaz, ekstra konuşma yapma."""
 
     for model_adi in model_listesi:
         log_ekle(f"🔍 Video analizi deneniyor: {model_adi}")
@@ -199,10 +197,9 @@ Bu bilgileri, bir sonraki adımda benim 'kurallar.txt' dosyamdaki formata göre 
                     time.sleep(3)
                     continue
                 else:
-                    log_ekle(f"⚠️ {model_adi} kullanılamadı ({hata_metni[:90]}...) → sıradaki modele geçiliyor")
+                    log_ekle(f"⚠️ {model_adi} kullanılamadı ({hata_metni[:90]}) → sıradaki modele geçiliyor")
                     break
     raise son_hata if son_hata else Exception("Hiçbir model videoyu analiz edemedi.")
-
 
 # ------------------------------------------------------------
 # SAYFA AYARLARI
@@ -212,23 +209,11 @@ st.set_page_config(page_title="otoXtra Asistanım", page_icon="🏎️", layout=
 st.markdown(
     """
     <style>
-    pre, code {
-        white-space: pre-wrap !important;
-        word-break: break-word !important;
-        overflow-wrap: anywhere !important;
-    }
+    pre, code { white-space: pre-wrap !important; word-break: break-word !important; overflow-wrap: anywhere !important; }
     @media (max-width: 640px) {
-        .block-container {
-            padding-left: 0.9rem;
-            padding-right: 0.9rem;
-            padding-top: 1.2rem;
-        }
-        h2, h3 {
-            font-size: 1.05rem !important;
-        }
-        .stButton button {
-            width: 100%;
-        }
+        .block-container { padding-left: 0.9rem; padding-right: 0.9rem; padding-top: 1.2rem; }
+        h2, h3 { font-size: 1.05rem !important; }
+        .stButton button { width: 100%; }
     }
     </style>
     """,
@@ -236,87 +221,51 @@ st.markdown(
 )
 
 st.subheader("🏎️ otoXtra — Otomatik Reels Asistanı")
-st.caption("Videonun konusunu manuel yazın VEYA viral referans videonuzu yükleyin; otoXtra gerisini halletsin!")
+st.caption("Viral referans videonuzu yükleyin veya konunuzu yazın; otoXtra Türk izleyicisi için gerisini halletsin!")
 
-# ------------------------------------------------------------
-# UYGULAMA DURUMU
-# ------------------------------------------------------------
-if "sonuc" not in st.session_state:
-    st.session_state.sonuc = None
-if "log_satirlari" not in st.session_state:
-    st.session_state.log_satirlari = []
+if "sonuc" not in st.session_state: st.session_state.sonuc = None
+if "log_satirlari" not in st.session_state: st.session_state.log_satirlari = []
 
-# ------------------------------------------------------------
-# API ŞİFRESİ
-# ------------------------------------------------------------
 try:
     gemini_key = st.secrets["GEMINI_API_KEY"]
 except Exception:
-    st.error("🔑 GEMINI_API_KEY bulunamadı! Lütfen Streamlit ayarlarından (Secrets) anahtarınızı girin.")
+    st.error("🔑 GEMINI_API_KEY bulunamadı!")
     st.stop()
 
-# ------------------------------------------------------------
-# SOL MENÜ - SES SEÇİMİ
-# ------------------------------------------------------------
 with st.sidebar:
     st.header("🎙️ Ses Ayarları")
     ses_secimi = st.selectbox("Seslendiren Seçimi", [
-        "Autonoe (Parlak ve Canlı - Kadın)",
-        "Puck (Eğlenceli ve Enerjik - Erkek)",
-        "Aoede (Havadar ve Yumuşak - Kadın)",
-        "Callirrhoe (Rahat ve Doğal - Kadın)",
-        "Kore (Net ve Kendinden Emin - Kadın)",
-        "Leda (Genç ve Dinamik - Kadın)",
-        "Zephyr (Parlak - Kadın)",
-        "Charon (Bilgilendirici - Erkek)",
-        "Orus (Net ve Sert - Erkek)",
-        "Iapetus (Temiz ve Akıcı - Erkek)",
-        "Umbriel (Rahat - Erkek)"
+        "Autonoe (Parlak ve Canlı - Kadın)", "Puck (Eğlenceli ve Enerjik - Erkek)",
+        "Aoede (Havadar ve Yumuşak - Kadın)", "Callirrhoe (Rahat ve Doğal - Kadın)",
+        "Kore (Net ve Kendinden Emin - Kadın)", "Leda (Genç ve Dinamik - Kadın)",
+        "Zephyr (Parlak - Kadın)", "Charon (Bilgilendirici - Erkek)",
+        "Orus (Net ve Sert - Erkek)", "Iapetus (Temiz ve Akıcı - Erkek)", "Umbriel (Rahat - Erkek)"
     ])
-
-    with st.expander("ℹ️ Hangi modeller deneniyor?"):
-        st.caption("Metin üretimi (sırayla denenir):")
-        for m in METIN_MODELLERI:
-            st.caption(f"• {m}")
-        st.caption("Seslendirme (sırayla denenir):")
-        for m in SES_MODELLERI:
-            st.caption(f"• {m}")
-        st.caption("Video analizi (sırayla denenir):")
-        for m in VIDEO_ANALIZ_MODELLERI:
-            st.caption(f"• {m}")
 
 # YENİ: VİDEO YÜKLEME ALANI
 uploaded_video = st.file_uploader(
     "🎥 Viral Referans Videonu Yükle (Otomatik Analiz Edilsin)", 
     type=['mp4', 'mov', 'webm'],
-    help="Videoyu yüklersen, Gemini videoyu izleyip Türk izleyicisi için viral noktaları otomatik çıkarır."
+    help="Videoyu yüklersen, AI videoyu izleyip Türk izleyicisi için viral strateji kurar."
 )
 
 if uploaded_video is not None:
     st.video(uploaded_video)
     if uploaded_video.size > 20 * 1024 * 1024:
-        st.error("⚠️ Video dosyası 20 MB'tan büyük! Ücretsiz Gemini API limiti nedeniyle videoyu analiz edemeyebilir. Lütfen videoyu sıkıştırıp (720p, düşük bitrate) tekrar yükle.")
-    else:
-        st.info("📌 **Not:** AI, seslendirmeyi tam bu videonun süresine göre ayarlayacak. Aşağıdaki 'Süre' kısmına videonun saniyesini tam olarak yazdığından emin ol.")
+        st.error("⚠️ Video 20 MB'tan büyük! Ücretsiz API limiti için lütfen videoyu sıkıştır (720p).")
 
-konu_akisi = st.text_area(
-    "🎬 Videonun konusu / akışı (Video yüklerseniz buraya ek notlar yazabilirsiniz)",
-    height=130,
-    placeholder="Örn: Sadece Togg T10X'in çekiş sistemine odaklan, Tucson ile karşılaştırmaya gerek yok...",
+# TEK BÜYÜK METİN KUTUSU (Eski 'konu' ve 'ek istekler' birleşti)
+konu_ve_istekler = st.text_area(
+    "🎬 Videonun konusu ve özel istekler",
+    height=150,
+    placeholder="Paragraf 1: Videonun genel konusu (Örn: Togg T10X'in çekiş sistemi ve Tucson ile kıyaslaması...)\n\nParagraf 2: Özel istekler (Örn: Sadece fiyat/performans odaklan, kış şartlarına değin, vs.)",
 )
 
 sc1, sc2 = st.columns([1, 3])
 with sc1:
-    sure_saniye = st.number_input("⏱️ Süre (saniye)", min_value=5, max_value=180, value=30, step=5)
-
-ek_istekler = st.text_area(
-    "✨ Ek istekler (opsiyonel)",
-    height=80,
-    placeholder="Örn: hook'ta fiyat vurgusu olsun, kapanışta soru sor... (boş bırakabilirsin)",
-)
+    sure_saniye = st.number_input("⏱️ Hedef Süre (saniye)", min_value=5, max_value=180, value=30, step=5)
 
 buton_tiklandi = st.button("🚀 otoXtra İçeriğini Üret!")
-
 log_kutusu = st.empty()
 
 def gunlugu_ciz():
@@ -330,10 +279,6 @@ def log_ekle(satir: str):
     gunlugu_ciz()
 
 gunlugu_ciz()
-st.caption(
-    "🐛 Bir sorun/hata görürsen bu kutunun tamamını (sağ üstteki kopyalama ikonuyla) "
-    "kopyalayıp doğrudan Claude'a yapıştırman yeterli — orada ne olduğunu anlayıp düzeltirim."
-)
 
 if buton_tiklandi:
     st.session_state.log_satirlari = []
@@ -342,62 +287,58 @@ if buton_tiklandi:
     try:
         client = genai.Client(api_key=gemini_key)
 
-        # YENİ: VİDEO ANALİZİ ENTEGRASYONU
         analiz_metni = ""
         if uploaded_video is not None and uploaded_video.size <= 20 * 1024 * 1024:
             log_ekle("🎥 Yüklenen video Gemini tarafından izlenip analiz ediliyor...")
             video_bytes = uploaded_video.getvalue()
             mime_type = uploaded_video.type
             
+            # Video analizine kullanıcının ek isteklerini de gönderiyoruz
             analiz_metni, analiz_modeli = video_analiz_et(
-                client, VIDEO_ANALIZ_MODELLERI, video_bytes, mime_type, log_ekle
+                client, VIDEO_ANALIZ_MODELLERI, video_bytes, mime_type, konu_ve_istekler, log_ekle
             )
-            log_ekle("🧠 Video analiz tamamlandı, şimdi kurallara göre içerik üretiliyor...")
+            log_ekle("🧠 Video analiz tamamlandı, kurallara göre içerik üretiliyor...")
             
-            # Video analizini ve manuel girdileri birleştiriyoruz
             video_icerigi = (
-                f"ANALİZ EDİLEN VİDEODAN ÇIKARILAN BİLGİLER:\n{analiz_metni}\n\n"
-                f"MANUEL GİRİLEN KONU / EK İSTEKLER:\n"
-                f"Video konusu / akışı: {konu_akisi}\n"
-                f"Video süresi: {sure_saniye} saniye\n"
-                f"Özel istekler: {ek_istekler.strip() if ek_istekler.strip() else 'Yok'}"
+                f"ANALİZ EDİLEN VİDEODAN ÇIKARILAN BİLGİLER VE STRATEJİ:\n{analiz_metni}\n\n"
+                f"KULLANICININ GİRDİĞİ TEMEL KONU / NOTLAR:\n{konu_ve_istekler.strip() if konu_ve_istekler.strip() else 'Kullanıcı ek not düşmedi, sadece analizdeki viral detayları kullan.'}"
             )
         else:
-            if not konu_akisi.strip():
-                st.warning("Lütfen videonun konusunu/akışını yazın veya bir referans video yükleyin.")
+            if not konu_ve_istekler.strip():
+                st.warning("Lütfen videonun konusunu yazın veya bir referans video yükleyin.")
                 st.stop()
                 
-            video_icerigi = (
-                f"Video konusu / akışı: {konu_akisi}\n"
-                f"Video süresi: {sure_saniye} saniye\n"
-                f"Özel istekler: {ek_istekler.strip() if ek_istekler.strip() else 'Yok'}"
-            )
+            video_icerigi = f"VİDEO KONUSU VE ÖZEL İSTEKLER:\n{konu_ve_istekler.strip()}"
 
-        # 1. KURALLARI TXT DOSYASINDAN OKUMA
         try:
             with open("kurallar.txt", "r", encoding="utf-8") as f:
                 BENIM_GEM_KURALLARIM = f.read()
         except FileNotFoundError:
-            st.error("⚠️ 'kurallar.txt' dosyası bulunamadı! Lütfen GitHub deponuza bu isimde bir dosya ekleyin.")
+            st.error("⚠️ 'kurallar.txt' dosyası bulunamadı!")
             st.stop()
 
-        system_prompt = BENIM_GEM_KURALLARIM + """
+        # YENİ SİSTEM PROMPTU (Süre mantığı ve Telifsiz Müzik kuralları eklendi)
+        system_prompt = BENIM_GEM_KURALLARIM + f"""
 
-ÖNEMLİ SİSTEM TALİMATI (otoXtra Uygulaması):
-Yukarıdaki otoXtra kurallarına (ton, vuruş yapısı, caption katmanları, hashtag kuralları vb.) GÖRE üretim yap.
-Ancak NİHAİ ÇIKTIYI, yukarıdaki "ÇIKTI FORMATI" bölümündeki ham metin/markdown gösterimi DEĞİL, sadece
-aşağıda tanımlanan JSON alanlarına göre ver:
+ÖNEMLİ SİSTEM TALİMATI (otoXtra Uygulaması - ÇOK KRİTİK KURALLAR):
 
-- seslendirme_metni: 4 vuruş yapısına uygun, TTS motoruna gidecek seslendirme metni. Düz metin, markdown KULLANMA.
-- reels_aciklamasi: Katmanlı Instagram açıklaması + en sonda 5 hashtag (tek bütün metin). Markdown KULLANMA
-  (yalnızca caption'a ait #etiketler kalabilir, onlar hashtag'dir, markdown değildir).
-- kapak_basliklari: 5 farklı kapak başlığı seçeneği. Her biri "ana" (2-4 kelime, TAMAMI BÜYÜK HARF) ve
-  "alt" (1 cümle) alanlarından oluşur. Bu alanların İÇİNDE markdown (**, _, #, vb.) veya "SEÇENEK 1" gibi
-  etiket KULLANMA, sadece düz metin yaz.
-- muzik_onerisi: Bu videonun moduna uygun "tarz" (TEK KELİME İngilizce mood/genre, örn: phonk, upbeat,
-  cinematic) ve Instagram/Threads "Edits" uygulamasının müzik kütüphanesinde bulunma ihtimali yüksek,
-  GERÇEKTEN VAR OLAN 3 adet şarkı önerisi ver ("sarki_onerileri" listesi, format: "Şarkı Adı - Sanatçı").
-  Bunlar indirilecek dosyalar değil, sadece kullanıcının Instagram Edits içinde arayıp ekleyeceği öneriler.
+1. SÜRE VE KURGU MANTIĞI (ÇOK ÖNEMLİ): 
+Kullanıcının aşağıda belirttiği HEDEF SÜRE: {sure_saniye} saniye. 
+Orijinal referans video daha uzun veya kısa olsa bile BU SÜREYİ IGNOR ET. Kullanıcı videoyu kurguda hızlandırıp/krıparak tam olarak {sure_saniye} saniyeye getirecektir. 
+Sen seslendirme metnini, kurallar.txt'teki kelime sayısı formülünü kullanarak TAM OLARAK {sure_saniye} saniyeye uygun uzunlukta yaz.
+
+2. TELİFSİZ MÜZİK KURALI (ÇOK ÖNEMLİ):
+Önerdiğin müzikler KESİNLİKLE telifsiz (royalty-free / no copyright) olmalıdır. 
+Telifli ana akım şarkılar (pop, rap, ünlü sanatçılar) ÖNERME. 
+Bunun yerine şunları öner: "Kevin MacLeod tarzı", "NCS (NoCopyrightSounds) Electronic", "YouTube Audio Library'deki Patrick Patrikios/Aakash Gandhi altyapıları", "Instagram Ticari Müzik Kütüphanesi'ndeki telifsiz Phonk/Lo-Fi/Cinematic aramaları".
+
+3. ÇIKTI FORMATI:
+Yukarıdaki otoXtra kurallarına GÖRE üretim yap. NİHAİ ÇIKTIYI sadece aşağıdaki JSON alanlarına göre ver:
+
+- seslendirme_metni: {sure_saniye} saniyeye tam uyan, 4 vuruş yapısına uygun, TTS motoruna gidecek düz metin. Markdown KULLANMA.
+- reels_aciklamasi: Katmanlı Instagram açıklaması + en sonda 5 hashtag. Markdown KULLANMA.
+- kapak_basliklari: 5 farklı kapak başlığı. "ana" (TAMAMI BÜYÜK HARF) ve "alt" alanları. Markdown KULLANMA.
+- muzik_onerisi: "tarz" (Telifsiz bir tür, örn: royalty-free phonk) ve GERÇEKTEN TELİFSİZ olan 3 şarkı/sanatçı önerisi ("sarki_onerileri" listesi).
 
 alt_metin alanı İSTENMİYOR, üretme.
 """
@@ -411,10 +352,7 @@ alt_metin alanı İSTENMİYOR, üretme.
                     "type": "ARRAY",
                     "items": {
                         "type": "OBJECT",
-                        "properties": {
-                            "ana": {"type": "STRING"},
-                            "alt": {"type": "STRING"},
-                        },
+                        "properties": {"ana": {"type": "STRING"}, "alt": {"type": "STRING"}},
                         "required": ["ana", "alt"],
                     },
                 },
@@ -422,10 +360,7 @@ alt_metin alanı İSTENMİYOR, üretme.
                     "type": "OBJECT",
                     "properties": {
                         "tarz": {"type": "STRING"},
-                        "sarki_onerileri": {
-                            "type": "ARRAY",
-                            "items": {"type": "STRING"},
-                        },
+                        "sarki_onerileri": {"type": "ARRAY", "items": {"type": "STRING"}},
                     },
                     "required": ["tarz", "sarki_onerileri"],
                 },
@@ -433,25 +368,21 @@ alt_metin alanı İSTENMİYOR, üretme.
             "required": ["seslendirme_metni", "reels_aciklamasi", "kapak_basliklari", "muzik_onerisi"],
         }
 
-        # 2. METİN ÜRETİMİ
         veri, kullanilan_metin_modeli = metin_uret(
             client, METIN_MODELLERI, video_icerigi, system_prompt, response_schema, log_ekle
         )
 
-        # 3. SES ÜRETİMİ
         secilen_ses_ingilizce = ses_secimi.split(" ")[0]
         ses_dosyasi = "seslendirme.wav"
         ses_basarili, kullanilan_ses_modeli = ses_uret(
             client, SES_MODELLERI, veri["seslendirme_metni"], secilen_ses_ingilizce, ses_dosyasi, log_ekle
         )
 
-        log_ekle("🎵 Müzik önerisi içerikle birlikte üretildi.")
+        log_ekle("🎵 Telifsiz müzik önerisi içerikle birlikte üretildi.")
         log_ekle("🏁 Tüm işlem tamamlandı.")
 
         st.session_state.sonuc = {
-            "veri": veri,
-            "ses_basarili": ses_basarili,
-            "ses_dosyasi": ses_dosyasi,
+            "veri": veri, "ses_basarili": ses_basarili, "ses_dosyasi": ses_dosyasi,
             "secilen_ses_ingilizce": secilen_ses_ingilizce,
             "kullanilan_metin_modeli": kullanilan_metin_modeli,
             "kullanilan_ses_modeli": kullanilan_ses_modeli,
@@ -500,7 +431,7 @@ if st.session_state.sonuc:
             st.warning("Ses dosyası bulunamadı. Lütfen tekrar üretin.")
 
     with mcol2:
-        st.markdown("**🎵 Müzik Önerisi** (Instagram Edits'te ara ve ekle)")
+        st.markdown("**🎵 Telifsiz Müzik Önerisi** (Instagram Ticari Kütüphane'de ara)")
         muzik_metni = muzik_onerisini_formatla(veri.get("muzik_onerisi"))
         st.code(muzik_metni, language=None)
 
