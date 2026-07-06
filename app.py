@@ -10,46 +10,34 @@ import wave
 
 # ============================================================
 # otoXtra — Otomatik Reels Asistanı
-# AŞAMA 3 GÜNCELLEMESİ:
-#   1) Süre mantığı güncellendi: AI orijinal video süresini IGNOR EDER.
-#      Sadece kullanıcının girdiği süreyi baz alıp "video hızlandırılmış"
-#      varsayımıyla o saniyeye uygun kelime sayısında metin yazar.
-#   2) Video analiz promptu "Türkiye'de Viral Stratejist" moduna alındı.
-#      Hook (kanca) önerileri ve izleyiciyi tutacak yerel detaylar isteniyor.
-#   3) "Ek istekler" kutusu kaldırıldı. Tek bir büyük metin kutusu var.
-#      İlk kısım konu, alt kısımlar özel istekler olarak AI'a iletiliyor.
-#   4) Müzik önerileri SADECE TELİFSİZ (Royalty-Free) olacak şekilde
-#      sistem promptuna kesin kurallar eklendi.
 # ============================================================
 
 METIN_MODELLERI = [
-    "gemini-3.1-pro-preview",   
-    "gemini-3.5-flash",        
-    "gemini-3-flash-preview",  
-    "gemini-2.5-pro",          
-    "gemini-2.5-flash",        
+    "gemini-3.1-pro-preview",
+    "gemini-3.5-flash",
+    "gemini-3-flash-preview",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
 ]
 
 SES_MODELLERI = [
-    "gemini-2.5-pro-preview-tts",    
-    "gemini-2.5-flash-preview-tts",  
+    "gemini-2.5-pro-preview-tts",
+    "gemini-2.5-flash-preview-tts",
 ]
 
 VIDEO_ANALIZ_MODELLERI = [
-    "gemini-2.5-pro",      
-    "gemini-2.5-flash",    
-    "gemini-1.5-pro",      
-    "gemini-1.5-flash",    
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+    "gemini-1.5-pro",
+    "gemini-1.5-flash",
 ]
 
-# ------------------------------------------------------------
-# YARDIMCI FONKSİYONLAR
-# ------------------------------------------------------------
 
 def markdown_temizle(metin: str) -> str:
     if not isinstance(metin, str):
         return ""
-    return re.sub(r"\*\*|__", "", metin).strip()
+    return re.sub(r"[*_#`]+", "", metin).strip()
+
 
 def kapak_basliklarini_formatla(liste) -> str:
     if not isinstance(liste, list) or not liste:
@@ -57,27 +45,32 @@ def kapak_basliklarini_formatla(liste) -> str:
     satirlar = []
     for i, secenek in enumerate(liste, start=1):
         if isinstance(secenek, dict):
-            ana = re.sub(r"[*_#`]", "", str(secenek.get("ana", ""))).strip()
-            alt = re.sub(r"[*_#`]", "", str(secenek.get("alt", ""))).strip()
+            ana = markdown_temizle(str(secenek.get("ana", "")))
+            alt = markdown_temizle(str(secenek.get("alt", "")))
         else:
-            ana, alt = re.sub(r"[*_#`]", "", str(secenek)).strip(), ""
+            ana, alt = markdown_temizle(str(secenek)), ""
         if alt:
             satirlar.append(f"{i}) {ana}\n    {alt}")
         else:
             satirlar.append(f"{i}) {ana}")
     return "\n\n".join(satirlar)
 
-def muzik_onerisini_formatla(muzik_onerisi) -> str:
-    if not isinstance(muzik_onerisi, dict):
-        return "(Müzik önerisi üretilemedi.)"
-    tarz = markdown_temizle(str(muzik_onerisi.get("tarz", "")))
-    sarkilar = muzik_onerisi.get("sarki_onerileri", []) or []
-    satirlar = [f"Telifsiz Tarz / Mod: {tarz}", ""]
-    for s in sarkilar:
-        satirlar.append(f"- {markdown_temizle(str(s))}")
-    if not sarkilar:
-        satirlar.append("(Şarkı önerisi üretilemedi.)")
-    return "\n".join(satirlar)
+
+def gecici_hata_mi(hata_metni: str) -> bool:
+    return any(kod in hata_metni for kod in ("429", "500", "502", "503", "504"))
+
+
+def guvenli_json_yukle(response_text: str):
+    if not response_text:
+        raise ValueError("Model boş yanıt döndürdü.")
+
+    temiz = response_text.strip()
+    try:
+        return json.loads(temiz)
+    except json.JSONDecodeError:
+        temiz = re.sub(r"^```json\s*|^```|```$", "", temiz, flags=re.IGNORECASE | re.MULTILINE).strip()
+        return json.loads(temiz)
+
 
 def metin_uret(client, model_listesi, video_icerigi, system_prompt, response_schema, log_ekle):
     son_hata = None
@@ -94,20 +87,20 @@ def metin_uret(client, model_listesi, video_icerigi, system_prompt, response_sch
                         response_schema=response_schema,
                     ),
                 )
-                veri = json.loads(response.text)
+                veri = guvenli_json_yukle(getattr(response, "text", ""))
                 log_ekle(f"✅ İçerik üretildi → kullanılan model: {model_adi}")
                 return veri, model_adi
             except Exception as e:
                 son_hata = e
                 hata_metni = str(e)
-                if "503" in hata_metni and deneme == 0:
-                    log_ekle(f"⏳ {model_adi} şu an meşgul (503). 3 sn sonra tekrar denenecek...")
+                if gecici_hata_mi(hata_metni) and deneme == 0:
+                    log_ekle(f"⏳ {model_adi} geçici hata verdi. 3 sn sonra tekrar denenecek...")
                     time.sleep(3)
                     continue
-                else:
-                    log_ekle(f"⚠️ {model_adi} kullanılamadı ({hata_metni[:90]}...) → sıradaki modele geçiliyor")
-                    break
+                log_ekle(f"⚠️ {model_adi} kullanılamadı ({hata_metni[:120]}...) → sıradaki modele geçiliyor")
+                break
     raise son_hata if son_hata else Exception("Hiçbir model içerik üretemedi.")
+
 
 def ses_uret(client, model_listesi, metin, ses_adi, cikti_dosyasi, log_ekle):
     son_hata = None
@@ -129,37 +122,50 @@ def ses_uret(client, model_listesi, metin, ses_adi, cikti_dosyasi, log_ekle):
                         ),
                     ),
                 )
-                audio_data = tts_response.candidates[0].content.parts[0].inline_data.data
+
+                candidates = getattr(tts_response, "candidates", None)
+                if not candidates:
+                    raise ValueError("TTS yanıtında candidates bulunamadı.")
+
+                content = getattr(candidates[0], "content", None)
+                parts = getattr(content, "parts", None) if content else None
+                if not parts:
+                    raise ValueError("TTS yanıtında audio part bulunamadı.")
+
+                inline_data = getattr(parts[0], "inline_data", None)
+                audio_data = getattr(inline_data, "data", None) if inline_data else None
+                if not audio_data:
+                    raise ValueError("TTS audio verisi boş döndü.")
+
                 with wave.open(cikti_dosyasi, "wb") as wf:
                     wf.setnchannels(1)
                     wf.setsampwidth(2)
                     wf.setframerate(24000)
                     wf.writeframes(audio_data)
+
                 log_ekle(f"✅ Ses üretildi → kullanılan model: {model_adi}")
                 return True, model_adi
             except Exception as e:
                 son_hata = e
                 hata_metni = str(e)
-                if "503" in hata_metni and deneme == 0:
-                    log_ekle(f"⏳ {model_adi} meşgul (503). 4 sn sonra tekrar denenecek...")
+                if gecici_hata_mi(hata_metni) and deneme == 0:
+                    log_ekle(f"⏳ {model_adi} geçici hata verdi. 4 sn sonra tekrar denenecek...")
                     time.sleep(4)
                     continue
-                else:
-                    log_ekle(f"⚠️ {model_adi} ile ses üretilemedi ({hata_metni[:90]}) → sıradaki modele geçiliyor")
-                    break
-    log_ekle(f"❌ Hiçbir ses modeli başarılı olamadı.")
+                log_ekle(f"⚠️ {model_adi} ile ses üretilemedi ({hata_metni[:120]}) → sıradaki modele geçiliyor")
+                break
+    log_ekle("❌ Hiçbir ses modeli başarılı olamadı.")
     return False, None
 
+
 def video_analiz_et(client, model_listesi, video_bytes, mime_type, kullanici_notlari, log_ekle):
-    """Yüklenen videoyu Gemini'ye gönderip Türk izleyicisi için derinlemesine viral analiz yaptırır."""
     son_hata = None
     video_part = types.Part.from_bytes(data=video_bytes, mime_type=mime_type)
-    
-    # KULLANICININ EK NOTLARI VARSA PROMPTA EKLENİYOR
+
     ek_notlar_bolumu = ""
     if kullanici_notlari.strip():
         ek_notlar_bolumu = f"""
-        ÖNEMLİ: Kullanıcı videoyu analiz ettirirken sana şu EK İSTEKLERİ/ODAK NOKTALARINI iletti. 
+        ÖNEMLİ: Kullanıcı videoyu analiz ettirirken sana şu EK İSTEKLERİ/ODAK NOKTALARINI iletti.
         Analizini yaparken bu istekleri MUTLAKA dikkate al ve videodaki ilgili detayları bu istekler ışığında değerlendir:
         --- KULLANICININ EK İSTEKLERİ ---
         {kullanici_notlari}
@@ -171,10 +177,10 @@ Yüklediğim videoyu kare kare, sesiyle birlikte analiz et. Amacımız bu videod
 
 Bana şu başlıklarda çok net, maddeler halinde rapor ver:
 
-1. VİRAL DETAYLAR & TÜRK İZLEYİCİSİ KANCASI: Videoda Türk izleyicisinin gözünü durduracak, merak uyandıracak veya tartışma yaratacak spesifik detaylar neler? (Örn: Beklenmedik bir fiyat, rakip markayla acımasız bir kıyaslama, günlük hayattan sinir bozucu ama gerçek bir detay, 'bizden biri' hissi veren bir dert). Türkiye piyasası için güncel değilse veya eksikse kendi güncel verilerinle düzelt.
-2. KURGU & HIZLANDIRMA STRATEJİSİ: Kullanıcı bu videoyu kurgularken hızlandıracak/krıpacak. Videonun en vurucu 3-4 görsel anını (B-roll, yakın çekim, hızlanma anı) belirt ve "Seslendirme bu anlarda şu tempoda gitmeli" diye not düş.
-3. HOOK (GİRİŞ KANCASI) ÖNERİSİ: Videonun ilk 3 saniyesinde izleyiciyi tokat gibi çarpacak, 'kaydırma'yı durduracak o spesifik cümleyi veya görsel efekti öner. (Örn: "Bu arabayı almadan önce bu fiyatı görün...", "Hyundai bayisi bunu duyunca sinirlenecek ama...")
-4. KANIŞTIRICI KAPANIŞ (CTA/LOOP) ÖNERİSİ: Videonun son 3 saniyesinde izleyiciyi yorum yapmaya itecek veya videoyu tekrar izletmek için sonunu başına bağlayacak o kritik cümleyi öner.
+1. VİRAL DETAYLAR & TÜRK İZLEYİCİSİ KANCASI: Videoda Türk izleyicisinin gözünü durduracak, merak uyandıracak veya tartışma yaratacak spesifik detaylar neler?
+2. KURGU & HIZLANDIRMA STRATEJİSİ: Videonun en vurucu 3-4 görsel anını belirt ve seslendirme temposu notu düş.
+3. HOOK (GİRİŞ KANCASI) ÖNERİSİ: İlk 3 saniyede kaydırmayı durduracak spesifik cümleyi öner.
+4. KAPANIŞ (CTA/LOOP) ÖNERİSİ: Son 3 saniyede yorum tetikleyecek veya tekrar izletecek kritik cümleyi öner.
 {ek_notlar_bolumu}
 
 Bu bilgileri, bir sonraki adımda benim 'kurallar.txt' dosyamdaki formata göre seslendirme metni üretmen için bana ham veri olarak ver. Doğrudan analiz sonucunu yaz, ekstra konuşma yapma."""
@@ -188,22 +194,19 @@ Bu bilgileri, bir sonraki adımda benim 'kurallar.txt' dosyamdaki formata göre 
                     contents=[video_part, analiz_promptu],
                 )
                 log_ekle(f"✅ Video analiz edildi → kullanılan model: {model_adi}")
-                return response.text, model_adi
+                return getattr(response, "text", ""), model_adi
             except Exception as e:
                 son_hata = e
                 hata_metni = str(e)
-                if "503" in hata_metni and deneme == 0:
-                    log_ekle(f"⏳ {model_adi} şu an meşgul (503). 3 sn sonra tekrar denenecek...")
+                if gecici_hata_mi(hata_metni) and deneme == 0:
+                    log_ekle(f"⏳ {model_adi} geçici hata verdi. 3 sn sonra tekrar denenecek...")
                     time.sleep(3)
                     continue
-                else:
-                    log_ekle(f"⚠️ {model_adi} kullanılamadı ({hata_metni[:90]}) → sıradaki modele geçiliyor")
-                    break
+                log_ekle(f"⚠️ {model_adi} kullanılamadı ({hata_metni[:120]}) → sıradaki modele geçiliyor")
+                break
     raise son_hata if son_hata else Exception("Hiçbir model videoyu analiz edemedi.")
 
-# ------------------------------------------------------------
-# SAYFA AYARLARI
-# ------------------------------------------------------------
+
 st.set_page_config(page_title="otoXtra Asistanım", page_icon="🏎️", layout="wide")
 
 st.markdown(
@@ -223,8 +226,10 @@ st.markdown(
 st.subheader("🏎️ otoXtra — Otomatik Reels Asistanı")
 st.caption("Viral referans videonuzu yükleyin veya konunuzu yazın; otoXtra Türk izleyicisi için gerisini halletsin!")
 
-if "sonuc" not in st.session_state: st.session_state.sonuc = None
-if "log_satirlari" not in st.session_state: st.session_state.log_satirlari = []
+if "sonuc" not in st.session_state:
+    st.session_state.sonuc = None
+if "log_satirlari" not in st.session_state:
+    st.session_state.log_satirlari = []
 
 try:
     gemini_key = st.secrets["GEMINI_API_KEY"]
@@ -242,9 +247,8 @@ with st.sidebar:
         "Orus (Net ve Sert - Erkek)", "Iapetus (Temiz ve Akıcı - Erkek)", "Umbriel (Rahat - Erkek)"
     ])
 
-# YENİ: VİDEO YÜKLEME ALANI
 uploaded_video = st.file_uploader(
-    "🎥 Viral Referans Videonu Yükle (Otomatik Analiz Edilsin)", 
+    "🎥 Viral Referans Videonu Yükle (Otomatik Analiz Edilsin)",
     type=['mp4', 'mov', 'webm'],
     help="Videoyu yüklersen, AI videoyu izleyip Türk izleyicisi için viral strateji kurar."
 )
@@ -254,11 +258,10 @@ if uploaded_video is not None:
     if uploaded_video.size > 20 * 1024 * 1024:
         st.error("⚠️ Video 20 MB'tan büyük! Ücretsiz API limiti için lütfen videoyu sıkıştır (720p).")
 
-# TEK BÜYÜK METİN KUTUSU (Eski 'konu' ve 'ek istekler' birleşti)
 konu_ve_istekler = st.text_area(
     "🎬 Videonun konusu ve özel istekler",
     height=150,
-    placeholder="Paragraf 1: Videonun genel konusu (Örn: Togg T10X'in çekiş sistemi ve Tucson ile kıyaslaması...)\n\nParagraf 2: Özel istekler (Örn: Sadece fiyat/performans odaklan, kış şartlarına değin, vs.)",
+    placeholder="Paragraf 1: Videonun genel konusu\n\nParagraf 2: Özel istekler",
 )
 
 sc1, sc2 = st.columns([1, 3])
@@ -268,15 +271,18 @@ with sc1:
 buton_tiklandi = st.button("🚀 otoXtra İçeriğini Üret!")
 log_kutusu = st.empty()
 
+
 def gunlugu_ciz():
     if st.session_state.log_satirlari:
         log_kutusu.code("\n".join(st.session_state.log_satirlari), language=None)
     else:
         log_kutusu.empty()
 
+
 def log_ekle(satir: str):
     st.session_state.log_satirlari.append(satir)
     gunlugu_ciz()
+
 
 gunlugu_ciz()
 
@@ -287,27 +293,25 @@ if buton_tiklandi:
     try:
         client = genai.Client(api_key=gemini_key)
 
-        analiz_metni = ""
         if uploaded_video is not None and uploaded_video.size <= 20 * 1024 * 1024:
             log_ekle("🎥 Yüklenen video Gemini tarafından izlenip analiz ediliyor...")
             video_bytes = uploaded_video.getvalue()
-            mime_type = uploaded_video.type
-            
-            # Video analizine kullanıcının ek isteklerini de gönderiyoruz
-            analiz_metni, analiz_modeli = video_analiz_et(
+            mime_type = uploaded_video.type or "video/mp4"
+
+            analiz_metni, _ = video_analiz_et(
                 client, VIDEO_ANALIZ_MODELLERI, video_bytes, mime_type, konu_ve_istekler, log_ekle
             )
             log_ekle("🧠 Video analiz tamamlandı, kurallara göre içerik üretiliyor...")
-            
+
             video_icerigi = (
                 f"ANALİZ EDİLEN VİDEODAN ÇIKARILAN BİLGİLER VE STRATEJİ:\n{analiz_metni}\n\n"
-                f"KULLANICININ GİRDİĞİ TEMEL KONU / NOTLAR:\n{konu_ve_istekler.strip() if konu_ve_istekler.strip() else 'Kullanıcı ek not düşmedi, sadece analizdeki viral detayları kullan.'}"
+                f"KULLANICININ GİRDİĞİ TEMEL KONU / NOTLAR:\n"
+                f"{konu_ve_istekler.strip() if konu_ve_istekler.strip() else 'Kullanıcı ek not düşmedi, sadece analizdeki viral detayları kullan.'}"
             )
         else:
             if not konu_ve_istekler.strip():
                 st.warning("Lütfen videonun konusunu yazın veya bir referans video yükleyin.")
                 st.stop()
-                
             video_icerigi = f"VİDEO KONUSU VE ÖZEL İSTEKLER:\n{konu_ve_istekler.strip()}"
 
         try:
@@ -317,28 +321,22 @@ if buton_tiklandi:
             st.error("⚠️ 'kurallar.txt' dosyası bulunamadı!")
             st.stop()
 
-        # YENİ SİSTEM PROMPTU (Süre mantığı ve Telifsiz Müzik kuralları eklendi)
         system_prompt = BENIM_GEM_KURALLARIM + f"""
 
 ÖNEMLİ SİSTEM TALİMATI (otoXtra Uygulaması - ÇOK KRİTİK KURALLAR):
 
-1. SÜRE VE KURGU MANTIĞI (ÇOK ÖNEMLİ): 
-Kullanıcının aşağıda belirttiği HEDEF SÜRE: {sure_saniye} saniye. 
-Orijinal referans video daha uzun veya kısa olsa bile BU SÜREYİ IGNOR ET. Kullanıcı videoyu kurguda hızlandırıp/krıparak tam olarak {sure_saniye} saniyeye getirecektir. 
+1. SÜRE VE KURGU MANTIĞI (ÇOK ÖNEMLİ):
+Kullanıcının aşağıda belirttiği HEDEF SÜRE: {sure_saniye} saniye.
+Orijinal referans video daha uzun veya kısa olsa bile BU SÜREYİ IGNORE ET.
+Kullanıcı videoyu kurguda hızlandırıp/kırparak tam olarak {sure_saniye} saniyeye getirecektir.
 Sen seslendirme metnini, kurallar.txt'teki kelime sayısı formülünü kullanarak TAM OLARAK {sure_saniye} saniyeye uygun uzunlukta yaz.
 
-2. TELİFSİZ MÜZİK KURALI (ÇOK ÖNEMLİ):
-Önerdiğin müzikler KESİNLİKLE telifsiz (royalty-free / no copyright) olmalıdır. 
-Telifli ana akım şarkılar (pop, rap, ünlü sanatçılar) ÖNERME. 
-Bunun yerine şunları öner: "Kevin MacLeod tarzı", "NCS (NoCopyrightSounds) Electronic", "YouTube Audio Library'deki Patrick Patrikios/Aakash Gandhi altyapıları", "Instagram Ticari Müzik Kütüphanesi'ndeki telifsiz Phonk/Lo-Fi/Cinematic aramaları".
-
-3. ÇIKTI FORMATI:
+2. ÇIKTI FORMATI:
 Yukarıdaki otoXtra kurallarına GÖRE üretim yap. NİHAİ ÇIKTIYI sadece aşağıdaki JSON alanlarına göre ver:
 
 - seslendirme_metni: {sure_saniye} saniyeye tam uyan, 4 vuruş yapısına uygun, TTS motoruna gidecek düz metin. Markdown KULLANMA.
 - reels_aciklamasi: Katmanlı Instagram açıklaması + en sonda 5 hashtag. Markdown KULLANMA.
 - kapak_basliklari: 5 farklı kapak başlığı. "ana" (TAMAMI BÜYÜK HARF) ve "alt" alanları. Markdown KULLANMA.
-- muzik_onerisi: "tarz" (Telifsiz bir tür, örn: royalty-free phonk) ve GERÇEKTEN TELİFSİZ olan 3 şarkı/sanatçı önerisi ("sarki_onerileri" listesi).
 
 alt_metin alanı İSTENMİYOR, üretme.
 """
@@ -356,16 +354,8 @@ alt_metin alanı İSTENMİYOR, üretme.
                         "required": ["ana", "alt"],
                     },
                 },
-                "muzik_onerisi": {
-                    "type": "OBJECT",
-                    "properties": {
-                        "tarz": {"type": "STRING"},
-                        "sarki_onerileri": {"type": "ARRAY", "items": {"type": "STRING"}},
-                    },
-                    "required": ["tarz", "sarki_onerileri"],
-                },
             },
-            "required": ["seslendirme_metni", "reels_aciklamasi", "kapak_basliklari", "muzik_onerisi"],
+            "required": ["seslendirme_metni", "reels_aciklamasi", "kapak_basliklari"],
         }
 
         veri, kullanilan_metin_modeli = metin_uret(
@@ -378,11 +368,12 @@ alt_metin alanı İSTENMİYOR, üretme.
             client, SES_MODELLERI, veri["seslendirme_metni"], secilen_ses_ingilizce, ses_dosyasi, log_ekle
         )
 
-        log_ekle("🎵 Telifsiz müzik önerisi içerikle birlikte üretildi.")
         log_ekle("🏁 Tüm işlem tamamlandı.")
 
         st.session_state.sonuc = {
-            "veri": veri, "ses_basarili": ses_basarili, "ses_dosyasi": ses_dosyasi,
+            "veri": veri,
+            "ses_basarili": ses_basarili,
+            "ses_dosyasi": ses_dosyasi,
             "secilen_ses_ingilizce": secilen_ses_ingilizce,
             "kullanilan_metin_modeli": kullanilan_metin_modeli,
             "kullanilan_ses_modeli": kullanilan_ses_modeli,
@@ -390,13 +381,11 @@ alt_metin alanı İSTENMİYOR, üretme.
 
     except Exception:
         hata_detay = traceback.format_exc()
-        log_ekle("❌ HATA OLUŞTU — işlem tamamlanamadı. Aşağıdaki tüm kutuyu kopyalayıp Claude'a gönderebilirsin:")
+        log_ekle("❌ HATA OLUŞTU — işlem tamamlanamadı. Aşağıdaki tüm kutuyu kopyalayıp destek için paylaşabilirsin:")
         log_ekle(hata_detay)
-        st.error("Sistemde bir hata oluştu. Yukarıdaki süreç kutusunun tamamını kopyalayıp bana gönderirsen hemen bakarım.")
+        st.error("Sistemde bir hata oluştu. Yukarıdaki süreç kutusunun tamamını kopyalayıp gönderirsen hemen bakarım.")
 
-# ------------------------------------------------------------
-# 4. SONUÇLARI GÖSTER
-# ------------------------------------------------------------
+
 if st.session_state.sonuc:
     sonuc = st.session_state.sonuc
     veri = sonuc["veri"]
@@ -416,24 +405,18 @@ if st.session_state.sonuc:
             st.rerun()
 
     st.markdown("### 🎧 Medya Dosyaları")
-    mcol1, mcol2 = st.columns(2)
-
-    with mcol1:
-        st.markdown(f"**🎙️ Seslendirme** (model: {kullanilan_ses_modeli})")
-        if ses_basarili and os.path.exists(ses_dosyasi):
-            st.audio(ses_dosyasi)
-            with open(ses_dosyasi, "rb") as f:
-                st.download_button(
-                    f"⬇️ {secilen_ses_ingilizce} Sesini İndir (.wav)",
-                    f, file_name="seslendirme.wav", mime="audio/wav",
-                )
-        else:
-            st.warning("Ses dosyası bulunamadı. Lütfen tekrar üretin.")
-
-    with mcol2:
-        st.markdown("**🎵 Telifsiz Müzik Önerisi** (Instagram Ticari Kütüphane'de ara)")
-        muzik_metni = muzik_onerisini_formatla(veri.get("muzik_onerisi"))
-        st.code(muzik_metni, language=None)
+    st.markdown(f"**🎙️ Seslendirme** (model: {kullanilan_ses_modeli})")
+    if ses_basarili and os.path.exists(ses_dosyasi):
+        st.audio(ses_dosyasi)
+        with open(ses_dosyasi, "rb") as f:
+            st.download_button(
+                f"⬇️ {secilen_ses_ingilizce} Sesini İndir (.wav)",
+                f,
+                file_name="seslendirme.wav",
+                mime="audio/wav",
+            )
+    else:
+        st.warning("Ses dosyası bulunamadı. Lütfen tekrar üretin.")
 
     st.divider()
     st.markdown("### 📝 otoXtra Metin İçerikleri")
@@ -451,4 +434,3 @@ if st.session_state.sonuc:
 
     with st.expander("🎙️ Seslendirme Metni (kontrol için)"):
         st.code(markdown_temizle(veri.get("seslendirme_metni", "")), language=None)
-
