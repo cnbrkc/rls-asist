@@ -10,35 +10,303 @@ import wave
 
 # ============================================================
 # otoXtra — Otomatik Reels Asistanı
-# AŞAMA 5 (AKILLI MODEL YÖNETİMİ):
-#   - Öncelik sırası: Ses metni > Açıklama > Video analizi > Kapak/Müzik
-#   - Her model hem birincil hem yedek olarak kullanılıyor.
-#   - Metin üretiminde "en akıllı" model (Pro) birinci sırada.
-#   - Video analizinde "kota dostu ama güçlü" model (Flash) birinci sırada.
-#   - Hiçbir model çöp değildir, hepsi bir yerde yedek olarak bekler.
+# GÜVENLİ VERSİYON: API key'ler artık koda gömülü DEĞİL.
+# Tüm anahtarlar Streamlit Secrets'tan (güvenli kasa) okunuyor.
 # ============================================================
 
-# METİN ÜRETİMİ (En kritik aşama - En iyi metni üreten Pro model birinci)
+# ------------------------------------------------------------
+# API KEY YAPILANDIRMASI (Streamlit Secrets'tan okunuyor)
+# ------------------------------------------------------------
+try:
+    API_KEYS = dict(st.secrets["GEMINI_KEYS"])
+    if not API_KEYS:
+        raise ValueError("API_KEYS boş")
+except Exception as e:
+    st.error("🔑 API anahtarları Streamlit Secrets'ta bulunamadı veya boş! Lütfen Secrets ayarlarını kontrol edin.")
+    st.stop()
+
+# ------------------------------------------------------------
+# COOLDOWN SÜRELERİ (saniye)
+# ------------------------------------------------------------
+COOLDOWN_KOTA = 24 * 60 * 60       # 24 saat (429 - o key o modeli kullanamaz)
+COOLDOWN_SUNUCU = 15 * 60           # 15 dk (503 - o model herkes için çöktü)
+COOLDOWN_BULUNAMADI = 24 * 60 * 60  # 24 saat (404 - o model yok)
+COOLDOWN_DIGER = 5 * 60             # 5 dk (belirsiz hata)
+IP_BAN_KORUMA = 1.0                 # 1 sn (istekler arası bekleme)
+
+# ------------------------------------------------------------
+# MODEL LİSTELERİ (Temmuz 2026 - Güncel)
+# ------------------------------------------------------------
 METIN_MODELLERI = [
-    "gemini-2.5-pro",          # 1. TERCİH: En güçlü, en akıllı metin üretimi
-    "gemini-2.5-flash",        # 2. TERCİH: Çok güçlü, hızlı, daha az kota
-    "gemini-2.0-flash",        # 3. TERCİH: Stabil ve hızlı
-    "gemini-1.5-pro-latest",   # 4. TERCİH: Eski ama kanıtlanmış yedek
+    "gemini-3.5-flash",
+    "gemini-3.1-pro",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
 ]
 
-# SES ÜRETİMİ (TTS - Zaten özel modeller)
 SES_MODELLERI = [
-    "gemini-2.5-pro-preview-tts",    
-    "gemini-2.5-flash-preview-tts",  
+    "gemini-3.1-flash-tts",
+    "gemini-2.5-flash-preview-tts",
 ]
 
-# VİDEO ANALİZİ (Kota dostu ama güçlü modeller birinci, Pro son yedek)
 VIDEO_ANALIZ_MODELLERI = [
-    "gemini-2.5-flash",        # 1. TERCİH: Video analizinde mükemmel, kota dostu
-    "gemini-2.0-flash",        # 2. TERCİH: Çok stabil, hızlı video okuma
-    "gemini-1.5-flash-latest", # 3. TERCİH: Kanıtlanmış video modeli
-    "gemini-2.5-pro",          # SON ÇARE: Eğer Flash'lar çalışmazsa Pro devreye girer
+    "gemini-3.5-flash",
+    "gemini-3.1-pro",
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
 ]
+
+# ------------------------------------------------------------
+# AKILLI ROUTER
+# ------------------------------------------------------------
+class SmartRouter:
+    """
+    Banlama mantığı:
+      - 429 (kota)      → KEY+MODEL banlanır (o key o modeli 24 saat kullanamaz)
+      - 503 (sunucu)     → MODEL banlanır (hiçbir key o modeli 15 dk kullanamaz)
+      - 404 (bulunamadı) → MODEL banlanır (hiçbir key o modeli 24 saat kullanamaz)
+      - diğer            → KEY+MODEL banlanır (5 dk)
+    Kontrol sırası: MODEL banı → KEY banı → KEY+MODEL banı
+    """
+
+    def __init__(self):
+        if "blacklist" not in st.session_state:
+            st.session_state.blacklist = {}
+
+    # --- Blacklist yönetimi ---
+
+    def _is_banned(self, mail: str, model: str) -> bool:
+        """Verilen mail+model kullanabilir mi? (3 katmanlı kontrol)"""
+        now = time.time()
+        bl = st.session_state.blacklist
+
+        # 1) MODEL banı var mı? (tüm key'ler için)
+        model_key = f"*+{model}"
+        if model_key in bl:
+            if now < bl[model_key]:
+                return True
+            else:
+                del bl[model_key]
+
+        # 2) KEY banı var mı? (tüm modeller için)
+        key_ban = f"{mail}+*"
+        if key_ban in bl:
+            if now < bl[key_ban]:
+                return True
+            else:
+                del bl[key_ban]
+
+        # 3) KEY+MODEL banı var mı?
+        combo_key = f"{mail}+{model}"
+        if combo_key in bl:
+            if now < bl[combo_key]:
+                return True
+            else:
+                del bl[combo_key]
+
+        return False
+
+    def _ban(self, mail: str, model: str, cooldown: int, scope: str):
+        """
+        scope: 'combo' (key+model), 'model' (tüm key'ler), 'key' (tüm modeller)
+        """
+        if scope == "model":
+            st.session_state.blacklist[f"*+{model}"] = time.time() + cooldown
+        elif scope == "key":
+            st.session_state.blacklist[f"{mail}+*"] = time.time() + cooldown
+        else:
+            st.session_state.blacklist[f"{mail}+{model}"] = time.time() + cooldown
+
+    def _parse_hata(self, hata_metni: str):
+        """
+        Hata metninden (scope, cooldown) döndürür.
+        scope: 'combo' | 'model' | 'key'
+        """
+        h = hata_metni.lower()
+
+        if "429" in hata_metni or "resource_exhausted" in h or "quota" in h:
+            return "combo", COOLDOWN_KOTA          # key+model ban
+        if "503" in hata_metni or "unavailable" in h:
+            return "model", COOLDOWN_SUNUCU         # model ban (herkes için)
+        if "404" in hata_metni or "not_found" in h:
+            return "model", COOLDOWN_BULUNAMADI     # model ban (herkes için)
+        return "combo", COOLDOWN_DIGER              # belirsiz → key+model
+
+    def _handle_hata(self, mail, model, hata_metni, log_ekle):
+        """Hatayı loglar, banlar ve ('devam' | 'break_model') döndürür."""
+        scope, cooldown = self._parse_hata(hata_metni)
+
+        if scope == "model":
+            # Model herkes için banlandı, key döngüsünü kır, sonraki modele geç
+            ban_sure = f"{cooldown // 60} dk" if cooldown < 3600 else f"{cooldown // 3600} saat"
+            log_ekle(f"   ❌ {model} MODEL bazlı hata → TÜM key'ler için {ban_sure} banlandı")
+            self._ban(mail, model, cooldown, "model")
+            time.sleep(IP_BAN_KORUMA)
+            return "break_model"
+
+        else:
+            # Key+model banlandı, diğer key'e geç
+            ban_sure = f"{cooldown // 60} dk" if cooldown < 3600 else f"{cooldown // 3600} saat"
+            log_ekle(f"   ⚠️ {mail} kotası/hatası → {model} ile {ban_sure} banlandı, diğer key deneniyor")
+            self._ban(mail, model, cooldown, scope)
+            time.sleep(IP_BAN_KORUMA)
+            return "devam"
+
+    # --- Üretim metodları ---
+
+    def metin_uret(self, video_icerigi, system_prompt, response_schema, log_ekle):
+        son_hata = None
+        for model_adi in METIN_MODELLERI:
+            log_ekle(f"🧠 Model deneniyor: {model_adi}")
+            model_denendi = False
+
+            for mail, api_key in API_KEYS.items():
+                if self._is_banned(mail, model_adi):
+                    log_ekle(f"   ⏸️ {mail} + {model_adi} banlı, atlanıyor")
+                    continue
+
+                model_denendi = True
+                log_ekle(f"   🚀 {mail} ile {model_adi} deneniyor...")
+
+                try:
+                    client = genai.Client(api_key=api_key)
+                    response = client.models.generate_content(
+                        model=model_adi,
+                        contents=video_icerigi,
+                        config=types.GenerateContentConfig(
+                            system_instruction=system_prompt,
+                            response_mime_type="application/json",
+                            response_schema=response_schema,
+                        ),
+                    )
+                    veri = json.loads(response.text)
+                    log_ekle(f"   ✅ Başarılı → {mail} + {model_adi}")
+                    time.sleep(IP_BAN_KORUMA)
+                    return veri, f"{mail}+{model_adi}"
+
+                except Exception as e:
+                    son_hata = e
+                    aksiyon = self._handle_hata(mail, model_adi, str(e), log_ekle)
+                    if aksiyon == "break_model":
+                        break  # model döngüsünden çık, sonraki modele geç
+
+            if not model_denendi:
+                log_ekle(f"   ⏸️ {model_adi} tüm key'ler için banlı, atlanıyor")
+
+        raise son_hata if son_hata else Exception("Tüm model+key kombinasyonları başarısız veya banlı.")
+
+    def ses_uret(self, metin, ses_adi, cikti_dosyasi, log_ekle):
+        son_hata = None
+        for model_adi in SES_MODELLERI:
+            log_ekle(f"🎙️ Model deneniyor: {model_adi}")
+            model_denendi = False
+
+            for mail, api_key in API_KEYS.items():
+                if self._is_banned(mail, model_adi):
+                    log_ekle(f"   ⏸️ {mail} + {model_adi} banlı, atlanıyor")
+                    continue
+
+                model_denendi = True
+                log_ekle(f"   🚀 {mail} ile {model_adi} deneniyor...")
+
+                try:
+                    client = genai.Client(api_key=api_key)
+                    tts_response = client.models.generate_content(
+                        model=model_adi,
+                        contents=metin,
+                        config=types.GenerateContentConfig(
+                            response_modalities=["AUDIO"],
+                            speech_config=types.SpeechConfig(
+                                voice_config=types.VoiceConfig(
+                                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                                        voice_name=ses_adi
+                                    )
+                                )
+                            ),
+                        ),
+                    )
+                    audio_data = tts_response.candidates[0].content.parts[0].inline_data.data
+                    with wave.open(cikti_dosyasi, "wb") as wf:
+                        wf.setnchannels(1)
+                        wf.setsampwidth(2)
+                        wf.setframerate(24000)
+                        wf.writeframes(audio_data)
+                    log_ekle(f"   ✅ Başarılı → {mail} + {model_adi}")
+                    time.sleep(IP_BAN_KORUMA)
+                    return True, f"{mail}+{model_adi}"
+
+                except Exception as e:
+                    son_hata = e
+                    aksiyon = self._handle_hata(mail, model_adi, str(e), log_ekle)
+                    if aksiyon == "break_model":
+                        break
+
+            if not model_denendi:
+                log_ekle(f"   ⏸️ {model_adi} tüm key'ler için banlı, atlanıyor")
+
+        log_ekle("❌ Hiçbir ses modeli başarılı olamadı.")
+        return False, None
+
+    def video_analiz_et(self, video_bytes, mime_type, kullanici_notlari, log_ekle):
+        son_hata = None
+        video_part = types.Part.from_bytes(data=video_bytes, mime_type=mime_type)
+
+        ek_notlar_bolumu = ""
+        if kullanici_notlari.strip():
+            ek_notlar_bolumu = f"""
+            ÖNEMLİ: Kullanıcı videoyu analiz ettirirken sana şu EK İSTEKLERİ/ODAK NOKTALARINI iletti. 
+            Analizini yaparken bu istekleri MUTLAKA dikkate al ve videodaki ilgili detayları bu istekler ışığında değerlendir:
+            --- KULLANICININ EK İSTEKLERİ ---
+            {kullanici_notlari}
+            -------------------------------
+            """
+
+        analiz_promptu = f"""Sen Türkiye'de sosyal medya (Instagram Reels, TikTok, YouTube Shorts) algoritmalarını ve Türk izleyicisinin psikolojisini avucunun içi gibi bilen, 'viral DNA' çıkaran uzman bir strateistsin.
+Yüklediğim videoyu kare kare, sesiyle birlikte analiz et. Amacımız bu videodaki en çarpıcı detayları bulup Türkiye'de patlama yapacak bir kurgu stratejisi oluşturmak.
+
+Bana şu başlıklarda çok net, maddeler halinde rapor ver:
+
+1. VİRAL DETAYLAR & TÜRK İZLEYİCİSİ KANCASI: Videoda Türk izleyicisinin gözünü durduracak, merak uyandıracak veya tartışma yaratacak spesifik detaylar neler? (Örn: Beklenmedik bir fiyat, rakip markayla acımasız bir kıyaslama, günlük hayattan sinir bozucu ama gerçek bir detay, 'bizden biri' hissi veren bir dert). Türkiye piyasası için güncel değilse veya eksikse kendi güncel verilerinle düzelt.
+2. KURGU & HIZLANDIRMA STRATEJİSİ: Kullanıcı bu videoyu kurgularken hızlandıracak/krıpacak. Videonun en vurucu 3-4 görsel anını (B-roll, yakın çekim, hızlanma anı) belirt ve "Seslendirme bu anlarda şu tempoda gitmeli" diye not düş.
+3. HOOK (GİRİŞ KANCASI) ÖNERİSİ: Videonun ilk 3 saniyesinde izleyiciyi tokat gibi çarpacak, 'kaydırma'yı durduracak o spesifik cümleyi veya görsel efekti öner. (Örn: "Bu arabayı almadan önce bu fiyatı görün...", "Hyundai bayisi bunu duyunca sinirlenecek ama...")
+4. KANIŞTIRICI KAPANIŞ (CTA/LOOP) ÖNERİSİ: Videonun son 3 saniyesinde izleyiciyi yorum yapmaya itecek veya videoyu tekrar izletmek için sonunu başına bağlayacak o kritik cümleyi öner.
+{ek_notlar_bolumu}
+
+Bu bilgileri, bir sonraki adımda benim 'kurallar.txt' dosyamdaki formata göre seslendirme metni üretmen için bana ham veri olarak ver. Doğrudan analiz sonucunu yaz, ekstra konuşma yapma."""
+
+        for model_adi in VIDEO_ANALIZ_MODELLERI:
+            log_ekle(f"🔍 Model deneniyor: {model_adi}")
+            model_denendi = False
+
+            for mail, api_key in API_KEYS.items():
+                if self._is_banned(mail, model_adi):
+                    log_ekle(f"   ⏸️ {mail} + {model_adi} banlı, atlanıyor")
+                    continue
+
+                model_denendi = True
+                log_ekle(f"   🚀 {mail} ile {model_adi} deneniyor...")
+
+                try:
+                    client = genai.Client(api_key=api_key)
+                    response = client.models.generate_content(
+                        model=model_adi,
+                        contents=[video_part, analiz_promptu],
+                    )
+                    log_ekle(f"   ✅ Başarılı → {mail} + {model_adi}")
+                    time.sleep(IP_BAN_KORUMA)
+                    return response.text, f"{mail}+{model_adi}"
+
+                except Exception as e:
+                    son_hata = e
+                    aksiyon = self._handle_hata(mail, model_adi, str(e), log_ekle)
+                    if aksiyon == "break_model":
+                        break
+
+            if not model_denendi:
+                log_ekle(f"   ⏸️ {model_adi} tüm key'ler için banlı, atlanıyor")
+
+        raise son_hata if son_hata else Exception("Hiçbir model videoyu analiz edemedi.")
+
 
 # ------------------------------------------------------------
 # YARDIMCI FONKSİYONLAR
@@ -48,6 +316,7 @@ def markdown_temizle(metin: str) -> str:
     if not isinstance(metin, str):
         return ""
     return re.sub(r"\*\*|__", "", metin).strip()
+
 
 def kapak_basliklarini_formatla(liste) -> str:
     if not isinstance(liste, list) or not liste:
@@ -65,6 +334,7 @@ def kapak_basliklarini_formatla(liste) -> str:
             satirlar.append(f"{i}) {ana}")
     return "\n\n".join(satirlar)
 
+
 def muzik_onerisini_formatla(muzik_onerisi) -> str:
     if not isinstance(muzik_onerisi, dict):
         return "(Müzik önerisi üretilemedi.)"
@@ -77,126 +347,6 @@ def muzik_onerisini_formatla(muzik_onerisi) -> str:
         satirlar.append("(Şarkı önerisi üretilemedi.)")
     return "\n".join(satirlar)
 
-def metin_uret(client, model_listesi, video_icerigi, system_prompt, response_schema, log_ekle):
-    son_hata = None
-    for model_adi in model_listesi:
-        log_ekle(f"🧠 Metin üretimi deneniyor: {model_adi}")
-        for deneme in range(2):
-            try:
-                response = client.models.generate_content(
-                    model=model_adi,
-                    contents=video_icerigi,
-                    config=types.GenerateContentConfig(
-                        system_instruction=system_prompt,
-                        response_mime_type="application/json",
-                        response_schema=response_schema,
-                    ),
-                )
-                veri = json.loads(response.text)
-                log_ekle(f"✅ İçerik üretildi → kullanılan model: {model_adi}")
-                return veri, model_adi
-            except Exception as e:
-                son_hata = e
-                hata_metni = str(e)
-                if "503" in hata_metni and deneme == 0:
-                    log_ekle(f"⏳ {model_adi} şu an meşgul (503). 3 sn sonra tekrar denenecek...")
-                    time.sleep(3)
-                    continue
-                else:
-                    log_ekle(f"⚠️ {model_adi} kullanılamadı ({hata_metni[:90]}) → sıradaki modele geçiliyor")
-                    break
-    raise son_hata if son_hata else Exception("Hiçbir model içerik üretemedi.")
-
-def ses_uret(client, model_listesi, metin, ses_adi, cikti_dosyasi, log_ekle):
-    son_hata = None
-    for model_adi in model_listesi:
-        log_ekle(f"🎙️ Seslendirme deneniyor: {model_adi} (ses: {ses_adi})")
-        for deneme in range(2):
-            try:
-                tts_response = client.models.generate_content(
-                    model=model_adi,
-                    contents=metin,
-                    config=types.GenerateContentConfig(
-                        response_modalities=["AUDIO"],
-                        speech_config=types.SpeechConfig(
-                            voice_config=types.VoiceConfig(
-                                prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                                    voice_name=ses_adi
-                                )
-                            )
-                        ),
-                    ),
-                )
-                audio_data = tts_response.candidates[0].content.parts[0].inline_data.data
-                with wave.open(cikti_dosyasi, "wb") as wf:
-                    wf.setnchannels(1)
-                    wf.setsampwidth(2)
-                    wf.setframerate(24000)
-                    wf.writeframes(audio_data)
-                log_ekle(f"✅ Ses üretildi → kullanılan model: {model_adi}")
-                return True, model_adi
-            except Exception as e:
-                son_hata = e
-                hata_metni = str(e)
-                if "503" in hata_metni and deneme == 0:
-                    log_ekle(f"⏳ {model_adi} meşgul (503). 4 sn sonra tekrar denenecek...")
-                    time.sleep(4)
-                    continue
-                else:
-                    log_ekle(f"⚠️ {model_adi} ile ses üretilemedi ({hata_metni[:90]}) → sıradaki modele geçiliyor")
-                    break
-    log_ekle(f"❌ Hiçbir ses modeli başarılı olamadı.")
-    return False, None
-
-def video_analiz_et(client, model_listesi, video_bytes, mime_type, kullanici_notlari, log_ekle):
-    """Yüklenen videoyu Gemini'ye gönderip Türk izleyicisi için derinlemesine viral analiz yaptırır."""
-    son_hata = None
-    video_part = types.Part.from_bytes(data=video_bytes, mime_type=mime_type)
-    
-    ek_notlar_bolumu = ""
-    if kullanici_notlari.strip():
-        ek_notlar_bolumu = f"""
-        ÖNEMLİ: Kullanıcı videoyu analiz ettirirken sana şu EK İSTEKLERİ/ODAK NOKTALARINI iletti. 
-        Analizini yaparken bu istekleri MUTLAKA dikkate al ve videodaki ilgili detayları bu istekler ışığında değerlendir:
-        --- KULLANICININ EK İSTEKLERİ ---
-        {kullanici_notlari}
-        -------------------------------
-        """
-
-    analiz_promptu = f"""Sen Türkiye'de sosyal medya (Instagram Reels, TikTok, YouTube Shorts) algoritmalarını ve Türk izleyicisinin psikolojisini avucunun içi gibi bilen, 'viral DNA' çıkaran uzman bir strateistsin.
-Yüklediğim videoyu kare kare, sesiyle birlikte analiz et. Amacımız bu videodaki en çarpıcı detayları bulup Türkiye'de patlama yapacak bir kurgu stratejisi oluşturmak.
-
-Bana şu başlıklarda çok net, maddeler halinde rapor ver:
-
-1. VİRAL DETAYLAR & TÜRK İZLEYİCİSİ KANCASI: Videoda Türk izleyicisinin gözünü durduracak, merak uyandıracak veya tartışma yaratacak spesifik detaylar neler? (Örn: Beklenmedik bir fiyat, rakip markayla acımasız bir kıyaslama, günlük hayattan sinir bozucu ama gerçek bir detay, 'bizden biri' hissi veren bir dert). Türkiye piyasası için güncel değilse veya eksikse kendi güncel verilerinle düzelt.
-2. KURGU & HIZLANDIRMA STRATEJİSİ: Kullanıcı bu videoyu kurgularken hızlandıracak/krıpacak. Videonun en vurucu 3-4 görsel anını (B-roll, yakın çekim, hızlanma anı) belirt ve "Seslendirme bu anlarda şu tempoda gitmeli" diye not düş.
-3. HOOK (GİRİŞ KANCASI) ÖNERİSİ: Videonun ilk 3 saniyesinde izleyiciyi tokat gibi çarpacak, 'kaydırma'yı durduracak o spesifik cümleyi veya görsel efekti öner. (Örn: "Bu arabayı almadan önce bu fiyatı görün...", "Hyundai bayisi bunu duyunca sinirlenecek ama...")
-4. KANIŞTIRICI KAPANIŞ (CTA/LOOP) ÖNERİSİ: Videonun son 3 saniyesinde izleyiciyi yorum yapmaya itecek veya videoyu tekrar izletmek için sonunu başına bağlayacak o kritik cümleyi öner.
-{ek_notlar_bolumu}
-
-Bu bilgileri, bir sonraki adımda benim 'kurallar.txt' dosyamdaki formata göre seslendirme metni üretmen için bana ham veri olarak ver. Doğrudan analiz sonucunu yaz, ekstra konuşma yapma."""
-
-    for model_adi in model_listesi:
-        log_ekle(f"🔍 Video analizi deneniyor: {model_adi}")
-        for deneme in range(2):
-            try:
-                response = client.models.generate_content(
-                    model=model_adi,
-                    contents=[video_part, analiz_promptu],
-                )
-                log_ekle(f"✅ Video analiz edildi → kullanılan model: {model_adi}")
-                return response.text, model_adi
-            except Exception as e:
-                son_hata = e
-                hata_metni = str(e)
-                if "503" in hata_metni and deneme == 0:
-                    log_ekle(f"⏳ {model_adi} şu an meşgul (503). 3 sn sonra tekrar denenecek...")
-                    time.sleep(3)
-                    continue
-                else:
-                    log_ekle(f"⚠️ {model_adi} kullanılamadı ({hata_metni[:90]}) → sıradaki modele geçiliyor")
-                    break
-    raise son_hata if son_hata else Exception("Hiçbir model videoyu analiz edemedi.")
 
 # ------------------------------------------------------------
 # SAYFA AYARLARI
@@ -220,15 +370,16 @@ st.markdown(
 st.subheader("🏎️ otoXtra — Otomatik Reels Asistanı")
 st.caption("Viral referans videonuzu yükleyin veya konunuzu yazın; otoXtra Türk izleyicisi için gerisini halletsin!")
 
-if "sonuc" not in st.session_state: st.session_state.sonuc = None
-if "log_satirlari" not in st.session_state: st.session_state.log_satirlari = []
+if "sonuc" not in st.session_state:
+    st.session_state.sonuc = None
+if "log_satirlari" not in st.session_state:
+    st.session_state.log_satirlari = []
 
-try:
-    gemini_key = st.secrets["GEMINI_API_KEY"]
-except Exception:
-    st.error("🔑 GEMINI_API_KEY bulunamadı!")
-    st.stop()
+router = SmartRouter()
 
+# ------------------------------------------------------------
+# SOL MENÜ
+# ------------------------------------------------------------
 with st.sidebar:
     st.header("🎙️ Ses Ayarları")
     ses_secimi = st.selectbox("Seslendiren Seçimi", [
@@ -239,8 +390,35 @@ with st.sidebar:
         "Orus (Net ve Sert - Erkek)", "Iapetus (Temiz ve Akıcı - Erkek)", "Umbriel (Rahat - Erkek)"
     ])
 
+    st.divider()
+    st.header("🔑 API Key Havuzu")
+    for mail in API_KEYS.keys():
+        st.caption(f"• {mail}")
+
+    # Blacklist durumu göster
+    if st.session_state.blacklist:
+        st.divider()
+        st.header("🚫 Aktif Banlar")
+        now = time.time()
+        aktif_ban = {k: v for k, v in st.session_state.blacklist.items() if v > now}
+        if aktif_ban:
+            for ban_key, bitis in aktif_ban.items():
+                kalan = int(bitis - now)
+                if kalan > 3600:
+                    kalan_str = f"{kalan // 3600}s {kalan % 3600 // 60}dk"
+                else:
+                    kalan_str = f"{kalan // 60}dk"
+                st.caption(f"⛔ {ban_key} ({kalan_str})")
+        else:
+            st.caption("✅ Ban yok")
+    else:
+        st.caption("✅ Ban yok")
+
+# ------------------------------------------------------------
+# ANA ARAYÜZ
+# ------------------------------------------------------------
 uploaded_video = st.file_uploader(
-    "🎥 Viral Referans Videonu Yükle (Otomatik Analiz Edilsin)", 
+    "🎥 Viral Referans Videonu Yükle (Otomatik Analiz Edilsin)",
     type=['mp4', 'mov', 'webm'],
     help="Videoyu yüklersen, AI videoyu izleyip Türk izleyicisi için viral strateji kurar."
 )
@@ -253,7 +431,7 @@ if uploaded_video is not None:
 konu_ve_istekler = st.text_area(
     "🎬 Videonun konusu ve özel istekler",
     height=150,
-    placeholder="Paragraf 1: Videonun genel konusu (Örn: Togg T10X'in çekiş sistemi ve Tucson ile kıyaslaması...)\n\nParagraf 2: Özel istekler (Örn: Sadece fiyat/performans odaklan, kış şartlarına değin, vs.)",
+    placeholder="Paragraf 1: Videonun genel konusu\n\nParagraf 2: Özel istekler / odaklanılacak detaylar",
 )
 
 sc1, sc2 = st.columns([1, 3])
@@ -263,47 +441,52 @@ with sc1:
 buton_tiklandi = st.button("🚀 otoXtra İçeriğini Üret!")
 log_kutusu = st.empty()
 
+
 def gunlugu_ciz():
     if st.session_state.log_satirlari:
         log_kutusu.code("\n".join(st.session_state.log_satirlari), language=None)
     else:
         log_kutusu.empty()
 
+
 def log_ekle(satir: str):
     st.session_state.log_satirlari.append(satir)
     gunlugu_ciz()
 
+
 gunlugu_ciz()
 
+# ------------------------------------------------------------
+# ÜRETİM
+# ------------------------------------------------------------
 if buton_tiklandi:
     st.session_state.log_satirlari = []
     log_ekle("🚀 Üretim başladı...")
 
     try:
-        client = genai.Client(api_key=gemini_key)
-
         analiz_metni = ""
         if uploaded_video is not None and uploaded_video.size <= 20 * 1024 * 1024:
-            log_ekle("🎥 Yüklenen video Gemini tarafından izlenip analiz ediliyor...")
+            log_ekle("🎥 Video yükleniyor ve analiz ediliyor...")
             video_bytes = uploaded_video.getvalue()
             mime_type = uploaded_video.type
-            
-            analiz_metni, analiz_modeli = video_analiz_et(
-                client, VIDEO_ANALIZ_MODELLERI, video_bytes, mime_type, konu_ve_istekler, log_ekle
+
+            analiz_metni, analiz_modeli = router.video_analiz_et(
+                video_bytes, mime_type, konu_ve_istekler, log_ekle
             )
             log_ekle("🧠 Video analiz tamamlandı, kurallara göre içerik üretiliyor...")
-            
+
             video_icerigi = (
                 f"ANALİZ EDİLEN VİDEODAN ÇIKARILAN BİLGİLER VE STRATEJİ:\n{analiz_metni}\n\n"
-                f"KULLANICININ GİRDİĞİ TEMEL KONU / NOTLAR:\n{konu_ve_istekler.strip() if konu_ve_istekler.strip() else 'Kullanıcı ek not düşmedi, sadece analizdeki viral detayları kullan.'}"
+                f"KULLANICININ GİRDİĞİ TEMEL KONU / NOTLAR:\n"
+                f"{konu_ve_istekler.strip() if konu_ve_istekler.strip() else 'Kullanıcı ek not düşmedi, sadece analizdeki viral detayları kullan.'}"
             )
         else:
             if not konu_ve_istekler.strip():
                 st.warning("Lütfen videonun konusunu yazın veya bir referans video yükleyin.")
                 st.stop()
-                
             video_icerigi = f"VİDEO KONUSU VE ÖZEL İSTEKLER:\n{konu_ve_istekler.strip()}"
 
+        # Kuralları oku
         try:
             with open("kurallar.txt", "r", encoding="utf-8") as f:
                 BENIM_GEM_KURALLARIM = f.read()
@@ -361,21 +544,25 @@ alt_metin alanı İSTENMİYOR, üretme.
             "required": ["seslendirme_metni", "reels_aciklamasi", "kapak_basliklari", "muzik_onerisi"],
         }
 
-        veri, kullanilan_metin_modeli = metin_uret(
-            client, METIN_MODELLERI, video_icerigi, system_prompt, response_schema, log_ekle
+        # Metin üret
+        veri, kullanilan_metin_modeli = router.metin_uret(
+            video_icerigi, system_prompt, response_schema, log_ekle
         )
 
+        # Ses üret
         secilen_ses_ingilizce = ses_secimi.split(" ")[0]
         ses_dosyasi = "seslendirme.wav"
-        ses_basarili, kullanilan_ses_modeli = ses_uret(
-            client, SES_MODELLERI, veri["seslendirme_metni"], secilen_ses_ingilizce, ses_dosyasi, log_ekle
+        ses_basarili, kullanilan_ses_modeli = router.ses_uret(
+            veri["seslendirme_metni"], secilen_ses_ingilizce, ses_dosyasi, log_ekle
         )
 
         log_ekle("🎵 Telifsiz müzik önerisi içerikle birlikte üretildi.")
         log_ekle("🏁 Tüm işlem tamamlandı.")
 
         st.session_state.sonuc = {
-            "veri": veri, "ses_basarili": ses_basarili, "ses_dosyasi": ses_dosyasi,
+            "veri": veri,
+            "ses_basarili": ses_basarili,
+            "ses_dosyasi": ses_dosyasi,
             "secilen_ses_ingilizce": secilen_ses_ingilizce,
             "kullanilan_metin_modeli": kullanilan_metin_modeli,
             "kullanilan_ses_modeli": kullanilan_ses_modeli,
@@ -383,10 +570,13 @@ alt_metin alanı İSTENMİYOR, üretme.
 
     except Exception:
         hata_detay = traceback.format_exc()
-        log_ekle("❌ HATA OLUŞTU — işlem tamamlanamadı. Aşağıdaki tüm kutuyu kopyalayıp Claude'a gönderebilirsin:")
+        log_ekle("❌ HATA OLUŞTU — işlem tamamlanamadı:")
         log_ekle(hata_detay)
         st.error("Sistemde bir hata oluştu. Yukarıdaki süreç kutusunun tamamını kopyalayıp bana gönderirsen hemen bakarım.")
 
+# ------------------------------------------------------------
+# SONUÇLARI GÖSTER
+# ------------------------------------------------------------
 if st.session_state.sonuc:
     sonuc = st.session_state.sonuc
     veri = sonuc["veri"]
@@ -421,7 +611,7 @@ if st.session_state.sonuc:
             st.warning("Ses dosyası bulunamadı. Lütfen tekrar üretin.")
 
     with mcol2:
-        st.markdown("**🎵 Telifsiz Müzik Önerisi** (Instagram Ticari Kütüphane'de ara)")
+        st.markdown("**🎵 Telifsiz Müzik Önerisi**")
         muzik_metni = muzik_onerisini_formatla(veri.get("muzik_onerisi"))
         st.code(muzik_metni, language=None)
 
