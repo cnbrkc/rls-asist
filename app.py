@@ -108,7 +108,7 @@ def guvenli_json_yukle(response_text: str):
     try:
         return json.loads(temiz)
     except json.JSONDecodeError:
-        # Önce standart markdown temizliğini dene
+        # Önce standart markdown temizliğini dene (Satır bölünmesi engellendi)
         temiz_md = re.sub(r"^
 ```json\s*|^
 ```|
