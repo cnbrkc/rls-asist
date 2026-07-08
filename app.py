@@ -108,11 +108,26 @@ def guvenli_json_yukle(response_text: str):
     try:
         return json.loads(temiz)
     except json.JSONDecodeError:
-        temiz = re.sub(r"^
+        # Önce standart markdown temizliğini dene
+        temiz_md = re.sub(r"^
 ```json\s*|^
 ```|
 ```$", "", temiz, flags=re.IGNORECASE | re.MULTILINE).strip()
-        return json.loads(temiz)
+        try:
+            return json.loads(temiz_md)
+        except json.JSONDecodeError:
+            pass
+            
+        # En sağlam yöntem: İçindeki ilk { ve son } bulup çıkarmak
+        start = temiz.find('{')
+        end = temiz.rfind('}')
+        if start != -1 and end != -1 and end > start:
+            try:
+                return json.loads(temiz[start:end+1])
+            except json.JSONDecodeError:
+                pass
+                
+        raise ValueError(f"JSON parse edilemedi. Ham yanıt: {temiz[:200]}...")
 
 
 # ------------------------------------------------------------
@@ -514,10 +529,20 @@ if buton_tiklandi:
                 st.stop()
             video_icerigi = f"VİDEO KONUSU:\n{konu_ve_istekler.strip()}"
 
-        # Token limit koruması
+        # Token limit koruması (Kelime/Satır bütünlüğünü koruyarak kesme)
         if len(video_icerigi) > MAX_INPUT_KARAKTER:
-            video_icerigi = video_icerigi[:MAX_INPUT_KARAKTER]
-            log_ekle("⚠️ İçerik güvenli sınıra kısaltıldı.")
+            kirpilmis = video_icerigi[:MAX_INPUT_KARAKTER]
+            # Kelimenin veya cümlenin ortasından kesilmesini engellemek için son boşluğu veya noktayı bul
+            son_bosluk = kirpilmis.rfind(" ")
+            son_nokta = kirpilmis.rfind(".")
+            kesim_noktasi = max(son_bosluk, son_nokta)
+            
+            if kesim_noktasi > int(MAX_INPUT_KARAKTER * 0.9):
+                video_icerigi = kirpilmis[:kesim_noktasi].strip()
+            else:
+                video_icerigi = kirpilmis.strip()
+                
+            log_ekle("⚠️ İçerik güvenli sınıra kısaltıldı (kelime bütünlüğü korundu).")
 
         # Kuralları oku
         try:
@@ -599,7 +624,10 @@ Kurallar:
             veri["threads_aciklamasi"] = str(threads_veri.get("threads_aciklamasi", "")).strip()
         except Exception as threads_hata:
             log_ekle(f"⚠️ Threads ayrı üretilemedi ({str(threads_hata)[:100]}). Fallback hazırlanıyor.")
-            fallback = re.sub(r"(?m)^#.*$", "", veri.get("reels_aciklamasi", "")).strip()
+            # Sadece hashtag kelimelerini sil, tüm satırı yok et
+            fallback = re.sub(r"#\w+", "", veri.get("reels_aciklamasi", "")).strip()
+            # Kalan fazla boşlukları temizle
+            fallback = re.sub(r"\s+", " ", fallback).strip()
             veri["threads_aciklamasi"] = fallback[:500].rstrip()
             kullanilan_threads_modeli = "fallback"
 
@@ -622,7 +650,11 @@ Kurallar:
             "kullanilan_threads_modeli": kullanilan_threads_modeli,
         }
 
-    except Exception:
+    except Exception as e:
+        # Streamlit'in kendi akış kontrol exception'larını (st.stop, st.rerun) yakalama, direkt yukarı fırlat
+        if "StopExecution" in str(type(e)) or "RerunException" in str(type(e)):
+            raise 
+            
         hata_detay = traceback.format_exc()
         # API key'leri maskele
         for api_key in API_KEYS.values():
@@ -657,12 +689,18 @@ if st.session_state.sonuc:
     st.markdown("### 🎧 Medya")
     st.markdown(f"**🎙️ Seslendirme** (model: {kullanilan_ses_modeli})")
     if ses_basarili and os.path.exists(ses_dosyasi):
-        st.audio(ses_dosyasi)
         with open(ses_dosyasi, "rb") as f:
-            st.download_button(
-                f"⬇️ {secilen_ses_ingilizce} Sesini İndir (.wav)",
-                f, file_name="seslendirme.wav", mime="audio/wav",
-            )
+            ses_byte = f.read()
+        st.audio(ses_byte, format="audio/wav")
+        st.download_button(
+            f"⬇️ {secilen_ses_ingilizce} Sesini İndir (.wav)",
+            ses_byte, file_name="seslendirme.wav", mime="audio/wav",
+        )
+        # Dosya okunup belleğe alındı, diskte birikmemesi için silelim
+        try:
+            os.remove(ses_dosyasi)
+        except Exception:
+            pass
     else:
         st.warning("Ses dosyası bulunamadı.")
 
