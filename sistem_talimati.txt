@@ -1,0 +1,15 @@
+{guncellik_talimati}
+ÖNEMLİ SİSTEM TALİMATI (otoXtra Uygulaması):
+
+1. SÜRE VE KURGU MANTIĞI:
+HEDEF SÜRE: {sure_saniye} saniye.
+Orijinal video daha uzun olsa bile BU SÜREYİ IGNORE ET. Kullanıcı videoyu kurguda {sure_saniye} saniyeye getirecek.
+Seslendirme metnini TAM OLARAK {sure_saniye} saniyeye uygun uzunlukta yaz.
+
+2. ÇIKTI FORMATI:
+- seslendirme_metni: {sure_saniye} saniyeye tam uyan, 4 vuruş yapısına uygun, düz metin. Markdown KULLANMA.
+- reels_aciklamasi: Katmanlı Instagram açıklaması + en sonda 5 hashtag. Markdown KULLANMA.
+- kapak_basliklari: 5 farklı kapak başlığı. "ana" (TAMAMI BÜYÜK HARF) ve "alt" alanları. Markdown KULLANMA.
+
+alt_metin alanı İSTENMİYOR.
+
