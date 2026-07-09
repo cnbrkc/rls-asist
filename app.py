@@ -10,6 +10,7 @@ import wave
 import tempfile
 import uuid
 import base64
+from datetime import datetime
 
 # ============================================================
 # otoXtra — Otomatik Reels + Threads Asistanı
@@ -72,6 +73,47 @@ THREADS_MODELLERI = [
 ]
 
 MAX_INPUT_KARAKTER = 900_000  # Token limit aşımına karşı güvenli sınır
+
+# ------------------------------------------------------------
+# GÜNCELLİK / GOOGLE ARAMA DESTEĞİ
+# ------------------------------------------------------------
+# Google Search grounding + yapılandırılmış JSON çıktısı (response_schema)
+# şu anda sadece Gemini 3 serisi modellerde birlikte destekleniyor.
+# Bu yüzden arama aracı SADECE model adı "gemini-3" ile başlıyorsa eklenir;
+# eski (2.5) modellerde hataya yol açmaması için otomatik atlanır.
+GEMINI3_ARAMA_DESTEKLI_ONEK = "gemini-3"
+
+TURKCE_AYLAR = {
+    1: "Ocak", 2: "Şubat", 3: "Mart", 4: "Nisan", 5: "Mayıs", 6: "Haziran",
+    7: "Temmuz", 8: "Ağustos", 9: "Eylül", 10: "Ekim", 11: "Kasım", 12: "Aralık",
+}
+
+
+def guncel_tarih_metni() -> str:
+    """İstek anındaki tarihi Türkçe, okunaklı biçimde döndürür (örn: '9 Temmuz 2026')."""
+    simdi = datetime.now()
+    return f"{simdi.day} {TURKCE_AYLAR[simdi.month]} {simdi.year}"
+
+
+def model_arama_destekliyor_mu(model_adi: str) -> bool:
+    """Google Search grounding aracının, response_schema ile birlikte bu modelde
+    güvenle kullanılıp kullanılamayacağını döndürür (şu an sadece Gemini 3 serisi)."""
+    return model_adi.startswith(GEMINI3_ARAMA_DESTEKLI_ONEK)
+
+
+def guncellik_talimati_uret() -> str:
+    """Sistem promptlarına eklenecek, modeli güncel bilgi aramaya zorlayan talimat metni."""
+    return f"""
+ÖNEMLİ — GÜNCELLİK VE DOĞRULUK KURALI:
+Bugünün tarihi: {guncel_tarih_metni()}.
+Eğitim verin bu tarihten eski olabilir; fiyat, model yılı, teknik özellik, kampanya,
+vergi/ÖTV oranı gibi ZAMANLA DEĞİŞEN her bilgiyi ASLA ezberinden/tahminen yazma.
+Böyle bir bilgi vereceğin her seferinde önce google_search aracını kullanarak
+{guncel_tarih_metni()} tarihi itibarıyla GÜNCEL veriyi doğrula, sonra o güncel veriyi kullan.
+Güncel veriyi bulamazsan, eski/kesin olmayan bir rakam uydurmak yerine bunu genel ifadeyle geç
+(örn. "güncel fiyatı için bayiye danışılmalı" gibi) ama bunu istisna say, önce mutlaka aramayı dene.
+"""
+
 
 # ------------------------------------------------------------
 # YARDIMCI FONKSİYONLAR
@@ -206,8 +248,10 @@ class SmartRouter:
             time.sleep(IP_BAN_KORUMA)
             return "devam"
 
-    def metin_uret(self, video_icerigi, system_prompt, response_schema, log_ekle, model_listesi=None):
-        """Metin üretimi. model_listesi verilmezse METIN_MODELLERI kullanılır."""
+    def metin_uret(self, video_icerigi, system_prompt, response_schema, log_ekle, model_listesi=None, arama_kullan=True):
+        """Metin üretimi. model_listesi verilmezse METIN_MODELLERI kullanılır.
+        arama_kullan=True ise, destekleyen (Gemini 3 serisi) modellerde Google Search
+        grounding aracı otomatik olarak eklenir; eski modellerde otomatik atlanır."""
         if model_listesi is None:
             model_listesi = METIN_MODELLERI
 
@@ -226,14 +270,24 @@ class SmartRouter:
 
                 try:
                     client = genai.Client(api_key=api_key)
+
+                    # Google Search grounding + response_schema kombinasyonu şu an
+                    # sadece Gemini 3 serisinde destekleniyor; diğer modellerde
+                    # hataya yol açmaması için sadece uygun modellerde eklenir.
+                    arama_bu_modelde_aktif = arama_kullan and model_arama_destekliyor_mu(model_adi)
+                    config_parametreleri = dict(
+                        system_instruction=system_prompt,
+                        response_mime_type="application/json",
+                        response_schema=response_schema,
+                    )
+                    if arama_bu_modelde_aktif:
+                        config_parametreleri["tools"] = [types.Tool(google_search=types.GoogleSearch())]
+                        log_ekle(f"   🔎 {model_adi} için güncel bilgi araması aktif")
+
                     response = client.models.generate_content(
                         model=model_adi,
                         contents=video_icerigi,
-                        config=types.GenerateContentConfig(
-                            system_instruction=system_prompt,
-                            response_mime_type="application/json",
-                            response_schema=response_schema,
-                        ),
+                        config=types.GenerateContentConfig(**config_parametreleri),
                     )
                     veri = guvenli_json_yukle(getattr(response, "text", ""))
                     log_ekle(f"   ✅ Başarılı → {mail} + {model_adi}")
@@ -346,6 +400,10 @@ Bana şu başlıklarda çok net, maddeler halinde rapor ver:
 3. HOOK (GİRİŞ KANCASI) ÖNERİSİ: İlk 3 saniyede kaydırmayı durduracak cümle.
 4. KANIŞTIRICI KAPANIŞ (CTA/LOOP) ÖNERİSİ: Son 3 saniyede yorum tetikleyecek cümle.
 {ek_notlar_bolumu}
+{guncellik_talimati_uret()}
+Videoda geçen araç/model/fiyat/özellik gibi bilgilerden bahsedeceksen, google_search
+aracıyla önce bunları güncel haliyle doğrula (örn. aracın güncel Türkiye fiyatı,
+güncel donanım paketi gibi), ezberden eski rakam verme.
 
 Bu bilgileri ham veri olarak ver. Ekstra konuşma yapma."""
 
@@ -366,6 +424,9 @@ Bu bilgileri ham veri olarak ver. Ekstra konuşma yapma."""
                     response = client.models.generate_content(
                         model=model_adi,
                         contents=[video_part, analiz_promptu],
+                        config=types.GenerateContentConfig(
+                            tools=[types.Tool(google_search=types.GoogleSearch())],
+                        ),
                     )
                     log_ekle(f"   ✅ Başarılı → {mail} + {model_adi}")
                     time.sleep(IP_BAN_KORUMA)
@@ -550,7 +611,7 @@ if buton_tiklandi:
             st.stop()
 
         system_prompt = BENIM_GEM_KURALLARIM + f"""
-
+{guncellik_talimati_uret()}
 ÖNEMLİ SİSTEM TALİMATI (otoXtra Uygulaması):
 
 1. SÜRE VE KURGU MANTIĞI:
@@ -617,6 +678,7 @@ Kurallar:
                 threads_schema,
                 log_ekle,
                 model_listesi=THREADS_MODELLERI,
+                arama_kullan=False,
             )
             veri["threads_aciklamasi"] = str(threads_veri.get("threads_aciklamasi", "")).strip()
         except Exception as threads_hata:
