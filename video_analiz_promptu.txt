@@ -13,4 +13,3 @@ Bana şu başlıklarda çok net, maddeler halinde rapor ver:
 Videoda geçen araç/model/fiyat/özellik gibi bilgilerden bahsedeceksen, google_search aracıyla önce bunları güncel haliyle doğrula (örn. aracın güncel Türkiye fiyatı, güncel donanım paketi gibi), ezberden eski rakam verme.
 
 Bu bilgileri ham veri olarak ver. Ekstra konuşma yapma.
-
