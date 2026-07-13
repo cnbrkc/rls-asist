@@ -64,17 +64,15 @@ COOLDOWN_KOTA = 24 * 60 * 60
 COOLDOWN_SUNUCU = 15 * 60
 COOLDOWN_BULUNAMADI = 24 * 60 * 60
 COOLDOWN_DIGER = 5 * 60
-COOLDOWN_FREE_TIER_YOK = 7 * 24 * 60 * 60  # 7 gün
+COOLDOWN_FREE_TIER_YOK = 7 * 24 * 60 * 60
 IP_BAN_KORUMA = 1.0
-QUOTA_RETRY_DEFAULT = 10  # 429 hatasında varsayılan bekleme
+QUOTA_RETRY_DEFAULT = 5  # 10 yerine 5 saniye
 
 # ------------------------------------------------------------
-# MODEL LİSTELERİ
+# MODEL LİSTELERİ (Sadece Flash - Pro'lar kaldırıldı)
 # ------------------------------------------------------------
 METIN_MODELLERI = [
     "gemini-3.5-flash",
-    "gemini-3.1-pro",
-    "gemini-2.5-pro",
     "gemini-2.5-flash",
 ]
 
@@ -85,15 +83,11 @@ SES_MODELLERI = [
 
 VIDEO_ANALIZ_MODELLERI = [
     "gemini-3.5-flash",
-    "gemini-3.1-pro",
     "gemini-2.5-flash",
-    "gemini-2.5-pro",
 ]
 
 THREADS_MODELLERI = [
     "gemini-3.5-flash",
-    "gemini-3.1-pro",
-    "gemini-2.5-pro",
     "gemini-2.5-flash",
 ]
 
@@ -235,13 +229,13 @@ class SmartRouter:
         match = re.search(r"retryDelay[\"':\s]+(\d+)", hata_metni)
         if match:
             try:
-                return int(match.group(1)) + 2
+                return int(match.group(1)) + 1
             except ValueError:
                 pass
         match2 = re.search(r"retry in (\d+(?:\.\d+)?)s", hata_metni, re.IGNORECASE)
         if match2:
             try:
-                return int(float(match2.group(1))) + 2
+                return int(float(match2.group(1))) + 1
             except ValueError:
                 pass
         return 0
@@ -253,11 +247,9 @@ class SmartRouter:
     def _parse_hata(self, hata_metni: str):
         h = hata_metni.lower()
         
-        # "limit: 0" = model free tier'da YOK (kalıcı ban)
         if self._is_free_tier_yok(hata_metni):
             return "free_tier_yok", COOLDOWN_FREE_TIER_YOK
             
-        # 429 quota hatası = banlama, sadece bekle
         if "429" in hata_metni or "resource_exhausted" in h or "quota" in h:
             return "quota", 0
             
@@ -270,14 +262,12 @@ class SmartRouter:
     def _handle_hata(self, mail, model, hata_metni, log_ekle):
         scope, cooldown = self._parse_hata(hata_metni)
         
-        # FREE TIER YOK - Bu modeli uzun süre banla
         if scope == "free_tier_yok":
             log_ekle(f" 🚫 {model} free tier'da YOK (limit: 0) → 7 gün banlandı")
             self._ban(mail, model, cooldown, "model")
             time.sleep(IP_BAN_KORUMA)
             return "break_model"
         
-        # 429 QUOTA - BANLAMA, sadece bekle ve tekrar dene
         if scope == "quota":
             delay = self._retry_delay_cikar(hata_metni)
             if delay > 0:
@@ -286,7 +276,7 @@ class SmartRouter:
             else:
                 log_ekle(f" ⏳ {mail} kota aştı, {QUOTA_RETRY_DEFAULT}sn bekleniyor...")
                 time.sleep(QUOTA_RETRY_DEFAULT)
-            return "retry"  # Aynı key ile tekrar dene
+            return "retry"
         
         ban_sure = f"{cooldown // 60} dk" if cooldown < 3600 else f"{cooldown // 3600} saat"
 
@@ -317,7 +307,6 @@ class SmartRouter:
 
                 model_denendi = True
                 
-                # Quota retry döngüsü (max 3 deneme)
                 max_retries = 3
                 for attempt in range(max_retries):
                     log_ekle(f" 🚀 {mail} ile {model_adi} deneniyor...")
@@ -350,7 +339,6 @@ class SmartRouter:
                         aksiyon = self._handle_hata(mail, model_adi, str(e), log_ekle)
                         
                         if aksiyon == "retry":
-                            # Quota hatası - aynı key ile tekrar dene
                             if attempt < max_retries - 1:
                                 continue
                             else:
@@ -359,7 +347,7 @@ class SmartRouter:
                         elif aksiyon == "break_model":
                             break
                         else:
-                            break  # devam - diğer key'e geç
+                            break
                 
                 if aksiyon == "break_model":
                     break
@@ -493,21 +481,13 @@ class SmartRouter:
 # ------------------------------------------------------------
 st.set_page_config(page_title="otoXtra", page_icon="🏎️", layout="wide")
 
-# Mobile-first kompakt CSS
 st.markdown("""
 <style>
-    /* Kompakt spacing */
     .main .block-container { padding-top: 1rem; padding-bottom: 1rem; }
     .stTextArea textarea { font-size: 14px; }
     .stButton button { width: 100%; height: 48px; font-size: 16px; font-weight: 600; }
-    
-    /* Küçük caption'lar */
     [data-testid="stCaptionContainer"] { font-size: 12px; margin-bottom: 0.25rem; }
-    
-    /* Video preview daha küçük */
     [data-testid="stVideo"] video { max-height: 200px; }
-    
-    /* Expander daha kompakt */
     .streamlit-expanderHeader { font-size: 14px; }
 </style>
 """, unsafe_allow_html=True)
@@ -555,7 +535,7 @@ with st.sidebar:
             st.caption("✅ Temiz")
 
 # ------------------------------------------------------------
-# ANA ARAYÜZ - KOMPAKT
+# ANA ARAYÜZ
 # ------------------------------------------------------------
 uploaded_video = st.file_uploader(
     "🎥 Referans Video",
@@ -605,7 +585,7 @@ gunlugu_ciz()
 # ÜRETİM
 # ------------------------------------------------------------
 if buton_tiklandi:
-    sekmeyi_aktif_tut()  # Safari arka plan koruması - ÜRETİM başladığında aktif
+    sekmeyi_aktif_tut()
     st.session_state.log_satirlari = []
     log_ekle("🚀 Üretim başladı...")
 
@@ -794,7 +774,6 @@ if st.session_state.sonuc:
         st.caption(f"Kısa, sohbet havasında, hashtagsiz (Model: {kullanilan_threads_modeli})")
         st.code(markdown_temizle(veri.get("threads_aciklamasi", "")), language=None)
 
-    # SESLENDİRME METNİ - Ana çıktı olarak düzenlenebilir
     st.divider()
     st.markdown("### 🎙️ Seslendirme Metni")
     st.caption("TTS için üretilen metin. Düzenleyip yeniden ses üretebilirsiniz.")
