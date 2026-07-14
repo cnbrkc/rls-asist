@@ -11,5 +11,5 @@ SİSTEM TALİMATI (otoXtra):
 
 3. ÇIKTI (Markdown kullanma):
    - seslendirme_metni: {sure_saniye} sn’ye uygun, 4 vuruş, düz metin.
-   - reels_aciklamasi: Katmanlı açıklama. Metnin EN ALTINDA, ayrı bir satırda MUTLAKA 5 adet hashtag olacak. İlk hashtag her zaman #otoXtra olmalı.
+   - reels_aciklamasi: Katmanlı açıklama. Açıklamanın EN ALTINA, ayrı bir satıra TAM 5 ADET HASHTAG EKLE. Hashtag'ler kurallar.txt'deki etiket kurallarına uygun olacak. Eğer kurallar marka etiketi istiyorsa onu ekle, istemiyorsa tamamen içeriğe uygun seç.
    - kapak_basliklari: 5 alternatif; her biri "ana" (BÜYÜK HARF) ve "alt" içerir.
