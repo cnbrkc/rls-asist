@@ -11,9 +11,14 @@ Eğer aracın modelini videodan net çıkaramıyorsan, google_search ile doğrul
 
 Bana şu başlıklarda çok net, maddeler halinde rapor ver:
 
-1. VİRAL DETAYLAR & TÜRK İZLEYİCİSİ KANCASI: Türk izleyicisinin gözünü durduracak spesifik detaylar.
-2. KURGU & HIZLANDIRMA STRATEJİSİ: En vurucu 3-4 görsel an ve seslendirme temposu notu.
+1. VİRAL DETAYLAR & TÜRK İZLEYİCİSİ KANCASI: Türk izleyicisinin gözünü durduracak spesifik detaylar. Her detayın orijinal videodaki saniyesini yaz. Eğer hedef süre (sure_saniye) verildiyse, hızlandırma oranını (orijinal süre / hedef süre) hesapla ve hedef videodaki tahmini saniye karşılığını parantez içinde belirt (örnek: "orijinal 3. sn → hedef ~2.5 sn"). Oran yoksa sadece orijinal saniyeyi ver.
+
+2. KURGU & HIZLANDIRMA STRATEJİSİ: En vurucu 3-4 görsel an (orijinal ve varsa hedef saniyeli), seslendirme temposu notu.
+
 3. HOOK (GİRİŞ KANCASI) ÖNERİSİ: İlk 3 saniyede kaydırmayı durduracak cümle.
+
 4. KANIŞTIRICI KAPANIŞ (CTA/LOOP) ÖNERİSİ: Son 3 saniyede yorum tetikleyecek cümle.
+
+5. DUYGU AKIŞI: Videonun saniye aralıklı duygu haritası (örnek: 0-2 sn merak, 3-5 sn şok, 6-10 sn heyecan). Seslendirme metni bu duygu akışına uygun tonlanmalı.
 
 Bu bilgileri ham veri olarak ver. Ekstra konuşma yapma.
