@@ -11,7 +11,7 @@ Eğer aracın modelini videodan net çıkaramıyorsan, google_search ile doğrul
 
 Bana şu başlıklarda çok net, maddeler halinde rapor ver:
 
-1. VİRAL DETAYLAR & TÜRK İZLEYİCİSİ KANCASI: Türk izleyicisinin gözünü durduracak spesifik detaylar. Her detayın orijinal videodaki saniyesini yaz. Eğer hedef süre (sure_saniye) verildiyse, hızlandırma oranını (orijinal süre / hedef süre) hesapla ve hedef videodaki tahmini saniye karşılığını parantez içinde belirt (örnek: "orijinal 3. sn → hedef ~2.5 sn"). Oran yoksa sadece orijinal saniyeyi ver.
+1. VİRAL DETAYLAR & TÜRK İZLEYİCİSİ KANCASI: Türk izleyicisinin gözünü durduracak spesifik detaylar. Her detayın orijinal videodaki saniyesini yaz. Hedef süre ({sure_saniye} sn) verildiyse, orijinal video süresini tespit et ve zaman ölçekleme oranını (orijinal süre / hedef süre) hesapla. Oran 1'den büyükse hızlandırma, küçükse yavaşlatma yapılacak demektir. Hedef videodaki tahmini saniye karşılığını parantez içinde belirt (örnek: "orijinal 3. sn → hedef ~2.5 sn (hızlandırma)" veya "orijinal 3. sn → hedef ~4 sn (yavaşlatma)"). Oran yoksa sadece orijinal saniyeyi ver.
 
 2. KURGU & HIZLANDIRMA STRATEJİSİ: En vurucu 3-4 görsel an (orijinal ve varsa hedef saniyeli), seslendirme temposu notu.
 
