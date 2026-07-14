@@ -19,6 +19,61 @@ from typing import List, Tuple
 # ============================================================
 
 # ------------------------------------------------------------
+# KAYIT DOSYASI YARDIMCILARI
+# ------------------------------------------------------------
+KAYIT_DOSYASI = "kayitlar.json"
+MAX_KAYIT = 5
+SES_OMRU_SANIYE = 24 * 60 * 60  # 24 saat
+
+def kayitlari_yukle() -> List[dict]:
+    """JSON dosyasından kayıtları yükle, bozuksa sıfırla"""
+    try:
+        if os.path.exists(KAYIT_DOSYASI):
+            with open(KAYIT_DOSYASI, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return []
+
+def kayitlari_kaydet(kayitlar: List[dict]) -> None:
+    """Kayıtları JSON dosyasına yaz"""
+    try:
+        with open(KAYIT_DOSYASI, "w", encoding="utf-8") as f:
+            json.dump(kayitlar, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def kayit_ekle(uretim_verisi: dict) -> None:
+    """Yeni üretimi kaydet, 5'ten fazlaysa en eskisini sil"""
+    kayitlar = kayitlari_yukle()
+    
+    kayit = {
+        "tarih": datetime.now().strftime("%d %B %Y %H:%M"),
+        "seslendirme_metni": uretim_verisi.get("seslendirme_metni", ""),
+        "reels_aciklamasi": uretim_verisi.get("reels_aciklamasi", ""),
+        "kapak_basliklari": uretim_verisi.get("kapak_basliklari", []),
+        "threads_aciklamasi": uretim_verisi.get("threads_aciklamasi", ""),
+        "ses_adi": uretim_verisi.get("ses_adi", ""),
+        "sure_saniye": uretim_verisi.get("sure_saniye", 30),
+    }
+    
+    kayitlar.append(kayit)
+    
+    # Son 5 kaydı tut, eskiyi sil
+    if len(kayitlar) > MAX_KAYIT:
+        kayitlar = kayitlar[-MAX_KAYIT:]
+    
+    kayitlari_kaydet(kayitlar)
+
+def tum_kayitlari_sil() -> None:
+    """Tüm kayıtları sil"""
+    try:
+        if os.path.exists(KAYIT_DOSYASI):
+            os.remove(KAYIT_DOSYASI)
+    except Exception:
+        pass
+
+# ------------------------------------------------------------
 # PROMPT DOSYALARINI YÜKLEME YARDIMCILARI
 # ------------------------------------------------------------
 def prompt_dosyasini_oku(dosya_adi: str) -> str:
@@ -150,13 +205,37 @@ def guvenli_json_yukle(response_text: str) -> dict:
 
     raise ValueError(f"JSON parse edilemedi. Ham yanıt: {temiz[:200]}...")
 
-def temp_dosya_temizle(dosya_yolu: str) -> None:
-    """Geçici dosyayı güvenli şekilde siler"""
+def temp_dosya_temizle(dosya_yolu: str) -> bool:
+    """Geçici dosyayı güvenli şekilde siler, başarı durumunu döner"""
     try:
         if dosya_yolu and os.path.exists(dosya_yolu):
             os.remove(dosya_yolu)
+            return True
     except Exception:
         pass
+    return False
+
+def eski_ses_dosyalarini_temizle() -> None:
+    """24 saatten eski ses dosyalarını temizle (sayfa açılışında çalışır)"""
+    simdi = time.time()
+    temizlenecekler = []
+    
+    for dosya_yolu in st.session_state.get("gecici_ses_dosyalari", []):
+        if not os.path.exists(dosya_yolu):
+            temizlenecekler.append(dosya_yolu)
+            continue
+        
+        try:
+            dosya_zamani = os.path.getmtime(dosya_yolu)
+            if simdi - dosya_zamani > SES_OMRU_SANIYE:
+                if temp_dosya_temizle(dosya_yolu):
+                    temizlenecekler.append(dosya_yolu)
+        except Exception:
+            temizlenecekler.append(dosya_yolu)
+    
+    for dosya in temizlenecekler:
+        if dosya in st.session_state.gecici_ses_dosyalari:
+            st.session_state.gecici_ses_dosyalari.remove(dosya)
 
 # ------------------------------------------------------------
 # SEKMEYİ AKTİF TUT (Safari arka plan koruması)
@@ -470,6 +549,8 @@ st.markdown("""
     [data-testid="stCaptionContainer"] { font-size: 12px; margin-bottom: 0.25rem; }
     [data-testid="stVideo"] video { max-height: 200px; }
     .streamlit-expanderHeader { font-size: 14px; }
+    .gecmis-item { padding: 8px; margin: 4px 0; border-radius: 6px; cursor: pointer; }
+    .gecmis-item:hover { background-color: #f0f0f0; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -484,6 +565,9 @@ if "gecici_ses_dosyalari" not in st.session_state:
     st.session_state.gecici_ses_dosyalari = []
 
 router = SmartRouter()
+
+# Sayfa açılışında 24 saatten eski sesleri temizle
+eski_ses_dosyalarini_temizle()
 
 # ------------------------------------------------------------
 # SOL MENÜ
@@ -516,6 +600,42 @@ with st.sidebar:
                 st.caption(f"⛔ {ban_key} ({kalan_str})")
         else:
             st.caption("✅ Temiz")
+    
+    # 📜 GEÇMİŞ KAYITLAR
+    st.divider()
+    st.markdown("**📜 Geçmiş Üretimler**")
+    
+    kayitlar = kayitlari_yukle()
+    if kayitlar:
+        st.caption(f"Son {len(kayitlar)} üretim:")
+        for i, kayit in enumerate(reversed(kayitlar)):
+            tarih = kayit.get("tarih", "?")
+            sure = kayit.get("sure_saniye", "?")
+            ses = kayit.get("ses_adi", "?")
+            
+            if st.button(f"📝 {tarih} ({sure}sn - {ses})", key=f"kayit_{i}", use_container_width=True):
+                st.session_state.sonuc = {
+                    "veri": {
+                        "seslendirme_metni": kayit.get("seslendirme_metni", ""),
+                        "reels_aciklamasi": kayit.get("reels_aciklamasi", ""),
+                        "kapak_basliklari": kayit.get("kapak_basliklari", []),
+                        "threads_aciklamasi": kayit.get("threads_aciklamasi", ""),
+                    },
+                    "ses_basarili": False,
+                    "ses_dosyasi": "",
+                    "secilen_ses_ingilizce": kayit.get("ses_adi", ""),
+                    "kullanilan_metin_modeli": "geçmiş",
+                    "kullanilan_ses_modeli": "geçmiş",
+                    "kullanilan_threads_modeli": "geçmiş",
+                }
+                st.rerun()
+    else:
+        st.caption("Henüz kayıt yok")
+    
+    if kayitlar:
+        if st.button("🗑️ Tüm Geçmişi Sil", use_container_width=True):
+            tum_kayitlari_sil()
+            st.rerun()
 
 # ------------------------------------------------------------
 # ANA ARAYÜZ
@@ -550,6 +670,9 @@ with c2:
 sure_saniye = st.number_input("⏱️ Hedef Süre (sn)", min_value=5, max_value=180, value=30, step=5)
 
 buton_tiklandi = st.button("🚀 ÜRET!", disabled=video_buyuk, use_container_width=True)
+
+# Progress bar
+progress_bar = st.empty()
 log_kutusu = st.empty()
 
 def gunlugu_ciz() -> None:
@@ -562,6 +685,10 @@ def log_ekle(satir: str) -> None:
     st.session_state.log_satirlari.append(satir)
     gunlugu_ciz()
 
+def ilerlemeyi_guncelle(adim: int, toplam: int, mesaj: str) -> None:
+    """Progress bar'ı güncelle"""
+    progress_bar.progress(adim / toplam, text=mesaj)
+
 gunlugu_ciz()
 
 # ------------------------------------------------------------
@@ -571,8 +698,11 @@ if buton_tiklandi:
     sekmeyi_aktif_tut()
     st.session_state.log_satirlari = []
     log_ekle("🚀 Üretim başladı...")
+    ilerlemeyi_guncelle(0, 4, "Başlatılıyor...")
 
     try:
+        # ADIM 1: Video Analiz (%0-25)
+        ilerlemeyi_guncelle(1, 4, "🎥 Video analiz ediliyor...")
         if uploaded_video is not None:
             log_ekle("🎥 Video analiz ediliyor...")
             video_bytes = uploaded_video.getvalue()
@@ -608,6 +738,8 @@ if buton_tiklandi:
 
             log_ekle("⚠️ İçerik kısaltıldı.")
 
+        # ADIM 2: Metin Üretimi (%25-60)
+        ilerlemeyi_guncelle(2, 4, "✍️ Metin üretiliyor...")
         BENIM_GEM_KURALLARIM = prompt_dosyasini_oku("kurallar.txt")
         system_prompt = BENIM_GEM_KURALLARIM + sistem_talimati_olustur(sure_saniye)
 
@@ -632,6 +764,8 @@ if buton_tiklandi:
             video_icerigi, system_prompt, response_schema, log_ekle
         )
 
+        # ADIM 3: Threads Üretimi (%60-80)
+        ilerlemeyi_guncelle(3, 4, "🧵 Threads üretiliyor...")
         log_ekle("🧵 Threads üretiliyor...")
         threads_icerigi = f"""INSTAGRAM AÇIKLAMASI:
 {veri.get('reels_aciklamasi', '')}
@@ -664,6 +798,8 @@ GÖREV: Bu Instagram açıklamasını Threads ve X için daha sohbet havasında,
             veri["threads_aciklamasi"] = fallback[:500].rstrip()
             kullanilan_threads_modeli = "fallback"
 
+        # ADIM 4: Ses Üretimi (%80-100)
+        ilerlemeyi_guncelle(4, 4, "🎙️ Ses üretiliyor...")
         secilen_ses_ingilizce = ses_secimi.split(" ")[0]
         ses_dosyasi = os.path.join(tempfile.gettempdir(), f"ses_{uuid.uuid4().hex[:8]}.wav")
         ses_basarili, kullanilan_ses_modeli = router.ses_uret(
@@ -674,6 +810,17 @@ GÖREV: Bu Instagram açıklamasını Threads ve X için daha sohbet havasında,
             st.session_state.gecici_ses_dosyalari.append(ses_dosyasi)
 
         log_ekle("🏁 Tamamlandı.")
+        ilerlemeyi_guncelle(4, 4, "✅ Tamamlandı!")
+
+        # Kayıt ekle
+        kayit_ekle({
+            "seslendirme_metni": veri.get("seslendirme_metni", ""),
+            "reels_aciklamasi": veri.get("reels_aciklamasi", ""),
+            "kapak_basliklari": veri.get("kapak_basliklari", []),
+            "threads_aciklamasi": veri.get("threads_aciklamasi", ""),
+            "ses_adi": secilen_ses_ingilizce,
+            "sure_saniye": sure_saniye,
+        })
 
         st.session_state.sonuc = {
             "veri": veri,
@@ -696,6 +843,7 @@ GÖREV: Bu Instagram açıklamasını Threads ve X için daha sohbet havasında,
         log_ekle(hata_detay)
         
         st.session_state.sonuc = None
+        ilerlemeyi_guncelle(0, 4, "❌ Hata!")
         
         st.error("Hata oluştu. Logu kopyalayın.")
 
@@ -717,7 +865,7 @@ if st.session_state.sonuc:
 
     c1, c2 = st.columns([3, 1])
     with c2:
-        if st.button("🔄 Temizle", use_container_width=True):
+        if st.button("🗑️ Geçmiş Üretimleri Temizle", use_container_width=True):
             if st.session_state.sonuc:
                 eski_ses_dosyasi = st.session_state.sonuc.get("ses_dosyasi", "")
                 if eski_ses_dosyasi and os.path.exists(eski_ses_dosyasi):
@@ -729,6 +877,7 @@ if st.session_state.sonuc:
             
             st.session_state.sonuc = None
             st.session_state.log_satirlari = []
+            tum_kayitlari_sil()
             st.rerun()
 
     st.markdown("### 🎧 Medya")
@@ -742,7 +891,10 @@ if st.session_state.sonuc:
             ses_byte, file_name="seslendirme.wav", mime="audio/wav",
         )
     else:
-        st.warning("Ses dosyası bulunamadı.")
+        if kullanilan_metin_modeli == "geçmiş":
+            st.info("📝 Bu geçmiş bir kayıt. Ses dosyası artık mevcut değil.")
+        else:
+            st.warning("Ses dosyası bulunamadı.")
 
     st.divider()
     st.markdown("### 📝 Metin İçerikleri")
@@ -792,22 +944,3 @@ if st.session_state.sonuc:
                 st.success("✅ Yeni ses başarıyla üretildi!")
             else:
                 st.error("❌ Ses üretilemedi.")
-
-# ------------------------------------------------------------
-# SAYFA YENİLENDİĞİNDE ESKİ GEÇİCİ DOSYALARI TEMİZLE
-# ------------------------------------------------------------
-def eski_gecici_dosyalari_temizle() -> None:
-    """Session state'te birikmiş ama artık kullanılmayan geçici dosyaları temizler"""
-    temizlenecekler = []
-    for dosya_yolu in st.session_state.gecici_ses_dosyalari:
-        if os.path.exists(dosya_yolu):
-            if st.session_state.sonuc and dosya_yolu == st.session_state.sonuc.get("ses_dosyasi", ""):
-                continue
-            temp_dosya_temizle(dosya_yolu)
-            temizlenecekler.append(dosya_yolu)
-    
-    for dosya in temizlenecekler:
-        if dosya in st.session_state.gecici_ses_dosyalari:
-            st.session_state.gecici_ses_dosyalari.remove(dosya)
-
-eski_gecici_dosyalari_temizle()
