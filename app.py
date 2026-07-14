@@ -12,6 +12,7 @@ import tempfile
 import uuid
 import base64
 from datetime import datetime
+from typing import Dict, List, Optional, Tuple, Any, Union
 
 # ============================================================
 # otoXtra — Otomatik Reels + Threads Asistanı
@@ -114,7 +115,7 @@ def markdown_temizle(metin: str) -> str:
         return ""
     return re.sub(r"[\*\_\`\[\]]+", "", metin).strip()
 
-def kapak_basliklarini_formatla(liste) -> str:
+def kapak_basliklarini_formatla(liste: List) -> str:
     if not isinstance(liste, list) or not liste:
         return markdown_temizle(str(liste)) if liste else "(Kapak başlığı üretilemedi.)"
     satirlar = []
@@ -130,7 +131,7 @@ def kapak_basliklarini_formatla(liste) -> str:
             satirlar.append(f"{i}) {ana}")
     return "\n\n".join(satirlar)
 
-def guvenli_json_yukle(response_text: str):
+def guvenli_json_yukle(response_text: str) -> dict:
     if not response_text:
         raise ValueError("Model boş yanıt döndürdü.")
 
@@ -154,10 +155,18 @@ def guvenli_json_yukle(response_text: str):
 
     raise ValueError(f"JSON parse edilemedi. Ham yanıt: {temiz[:200]}...")
 
+def temp_dosya_temizle(dosya_yolu: str) -> None:
+    """Geçici dosyayı güvenli şekilde siler"""
+    try:
+        if dosya_yolu and os.path.exists(dosya_yolu):
+            os.remove(dosya_yolu)
+    except Exception:
+        pass
+
 # ------------------------------------------------------------
 # SEKMEYİ AKTİF TUT (Safari arka plan koruması)
 # ------------------------------------------------------------
-def sekmeyi_aktif_tut():
+def sekmeyi_aktif_tut() -> None:
     components.html("""
     <script>
     try {
@@ -181,7 +190,7 @@ def sekmeyi_aktif_tut():
 # AKILLI ROUTER
 # ------------------------------------------------------------
 class SmartRouter:
-    def __init__(self):
+    def __init__(self) -> None:
         if "blacklist" not in st.session_state:
             st.session_state.blacklist = {}
 
@@ -212,7 +221,7 @@ class SmartRouter:
 
         return False
 
-    def _ban(self, mail: str, model: str, cooldown: int, scope: str):
+    def _ban(self, mail: str, model: str, cooldown: int, scope: str) -> None:
         if scope == "model":
             st.session_state.blacklist[f"*+{model}"] = time.time() + cooldown
         elif scope == "key":
@@ -240,7 +249,7 @@ class SmartRouter:
         """limit: 0 hatası = model free tier'da YOK"""
         return "limit: 0" in hata_metni or "limit\": 0" in hata_metni
 
-    def _parse_hata(self, hata_metni: str):
+    def _parse_hata(self, hata_metni: str) -> Tuple[str, int]:
         h = hata_metni.lower()
         
         if self._is_free_tier_yok(hata_metni):
@@ -255,7 +264,7 @@ class SmartRouter:
             return "model", COOLDOWN_BULUNAMADI
         return "combo", COOLDOWN_DIGER
 
-    def _handle_hata(self, mail, model, hata_metni, log_ekle):
+    def _handle_hata(self, mail: str, model: str, hata_metni: str, log_ekle) -> str:
         scope, cooldown = self._parse_hata(hata_metni)
         
         if scope == "free_tier_yok":
@@ -287,7 +296,7 @@ class SmartRouter:
             time.sleep(IP_BAN_KORUMA)
             return "devam"
 
-    def metin_uret(self, video_icerigi, system_prompt, response_schema, log_ekle, model_listesi=None, arama_kullan=True):
+    def metin_uret(self, video_icerigi: str, system_prompt: str, response_schema: dict, log_ekle, model_listesi=None, arama_kullan: bool = True) -> Tuple[dict, str]:
         if model_listesi is None:
             model_listesi = METIN_MODELLERI
 
@@ -339,7 +348,7 @@ class SmartRouter:
 
         raise son_hata if son_hata else Exception("Tüm model+key kombinasyonları başarısız.")
 
-    def ses_uret(self, metin, ses_adi, cikti_dosyasi, log_ekle):
+    def ses_uret(self, metin: str, ses_adi: str, cikti_dosyasi: str, log_ekle) -> Tuple[bool, Optional[str]]:
         son_hata = None
         for model_adi in SES_MODELLERI:
             log_ekle(f"🎙️ Model deneniyor: {model_adi}")
@@ -407,7 +416,7 @@ class SmartRouter:
         log_ekle("❌ Hiçbir ses modeli başarılı olamadı.")
         return False, None
 
-    def video_analiz_et(self, video_bytes, mime_type, analiz_notlari, log_ekle):
+    def video_analiz_et(self, video_bytes: bytes, mime_type: str, analiz_notlari: str, log_ekle) -> Tuple[str, str]:
         son_hata = None
         video_part = types.Part.from_bytes(data=video_bytes, mime_type=mime_type)
 
@@ -481,6 +490,8 @@ if "sonuc" not in st.session_state:
     st.session_state.sonuc = None
 if "log_satirlari" not in st.session_state:
     st.session_state.log_satirlari = []
+if "gecici_ses_dosyalari" not in st.session_state:
+    st.session_state.gecici_ses_dosyalari = []
 
 router = SmartRouter()
 
@@ -551,13 +562,13 @@ sure_saniye = st.number_input("⏱️ Hedef Süre (sn)", min_value=5, max_value=
 buton_tiklandi = st.button("🚀 ÜRET!", disabled=video_buyuk, use_container_width=True)
 log_kutusu = st.empty()
 
-def gunlugu_ciz():
+def gunlugu_ciz() -> None:
     if st.session_state.log_satirlari:
         log_kutusu.code("\n".join(st.session_state.log_satirlari), language=None)
     else:
         log_kutusu.empty()
 
-def log_ekle(satir: str):
+def log_ekle(satir: str) -> None:
     st.session_state.log_satirlari.append(satir)
     gunlugu_ciz()
 
@@ -572,6 +583,7 @@ if buton_tiklandi:
     log_ekle("🚀 Üretim başladı...")
 
     try:
+        # Video boyut kontrolü (buton disable olsa da ek güvenlik)
         if uploaded_video is not None and uploaded_video.size > 20 * 1024 * 1024:
             log_ekle("❌ Video boyutu limit üzerinde.")
             st.error("Video 20 MB limitini aşıyor.")
@@ -662,7 +674,7 @@ GÖREV: Bu Instagram açıklamasını Threads ve X için daha sohbet havasında,
             )
             veri["threads_aciklamasi"] = str(threads_veri.get("threads_aciklamasi", "")).strip()
         except Exception as threads_hata:
-            log_ekle(f"⚠️ Threads fallback.")
+            log_ekle(f"⚠️ Threads hatası, fallback kullanılıyor: {str(threads_hata)[:100]}")
             fallback = re.sub(r"#\w+", "", veri.get("reels_aciklamasi", "")).strip()
             fallback = re.sub(r"\s+", " ", fallback).strip()
             veri["threads_aciklamasi"] = fallback[:500].rstrip()
@@ -673,6 +685,10 @@ GÖREV: Bu Instagram açıklamasını Threads ve X için daha sohbet havasında,
         ses_basarili, kullanilan_ses_modeli = router.ses_uret(
             veri["seslendirme_metni"], secilen_ses_ingilizce, ses_dosyasi, log_ekle
         )
+
+        # Başarılı ses dosyasını geçici dosyalar listesine ekle
+        if ses_basarili and os.path.exists(ses_dosyasi):
+            st.session_state.gecici_ses_dosyalari.append(ses_dosyasi)
 
         log_ekle("🏁 Tamamlandı.")
 
@@ -695,6 +711,10 @@ GÖREV: Bu Instagram açıklamasını Threads ve X için daha sohbet havasında,
             hata_detay = hata_detay.replace(api_key, "***")
         log_ekle("❌ HATA:")
         log_ekle(hata_detay)
+        
+        # Hata durumunda önceki sonuçları temizle
+        st.session_state.sonuc = None
+        
         st.error("Hata oluştu. Logu kopyalayın.")
 
 # ------------------------------------------------------------
@@ -716,6 +736,17 @@ if st.session_state.sonuc:
     c1, c2 = st.columns([3, 1])
     with c2:
         if st.button("🔄 Temizle", use_container_width=True):
+            # Eski ses dosyalarını temizle
+            if st.session_state.sonuc:
+                eski_ses_dosyasi = st.session_state.sonuc.get("ses_dosyasi", "")
+                if eski_ses_dosyasi and os.path.exists(eski_ses_dosyasi):
+                    temp_dosya_temizle(eski_ses_dosyasi)
+            
+            # Tüm birikmiş geçici ses dosyalarını temizle
+            for dosya in st.session_state.gecici_ses_dosyalari:
+                temp_dosya_temizle(dosya)
+            st.session_state.gecici_ses_dosyalari = []
+            
             st.session_state.sonuc = None
             st.session_state.log_satirlari = []
             st.rerun()
@@ -730,10 +761,7 @@ if st.session_state.sonuc:
             f"⬇️ {secilen_ses_ingilizce} Sesini İndir (.wav)",
             ses_byte, file_name="seslendirme.wav", mime="audio/wav",
         )
-        try:
-            os.remove(ses_dosyasi)
-        except Exception:
-            pass
+        # İndirme sonrası silme KALDIRILDI - sadece sayfa yenilenince veya çıkınca silinecek
     else:
         st.warning("Ses dosyası bulunamadı.")
 
@@ -781,10 +809,30 @@ if st.session_state.sonuc:
                     f"⬇️ Yeniden Üretilen Sesi İndir (.wav)",
                     yeni_ses_byte, file_name="seslendirme_yeni.wav", mime="audio/wav",
                 )
-                try:
-                    os.remove(yeni_ses_dosyasi)
-                except Exception:
-                    pass
+                # Yeni ses dosyasını geçici dosyalar listesine ekle
+                st.session_state.gecici_ses_dosyalari.append(yeni_ses_dosyasi)
                 st.success("✅ Yeni ses başarıyla üretildi!")
             else:
                 st.error("❌ Ses üretilemedi.")
+
+# ------------------------------------------------------------
+# SAYFA YENİLENDİĞİNDE ESKİ GEÇİCİ DOSYALARI TEMİZLE
+# ------------------------------------------------------------
+def eski_gecici_dosyalari_temizle() -> None:
+    """Session state'te birikmiş ama artık kullanılmayan geçici dosyaları temizler"""
+    temizlenecekler = []
+    for dosya_yolu in st.session_state.gecici_ses_dosyalari:
+        if os.path.exists(dosya_yolu):
+            # Eğer bu dosya mevcut sonuçtaki ses dosyası DEĞİLSE temizle
+            if st.session_state.sonuc and dosya_yolu == st.session_state.sonuc.get("ses_dosyasi", ""):
+                continue
+            temp_dosya_temizle(dosya_yolu)
+            temizlenecekler.append(dosya_yolu)
+    
+    # Temizlenenleri listeden çıkar
+    for dosya in temizlenecekler:
+        if dosya in st.session_state.gecici_ses_dosyalari:
+            st.session_state.gecici_ses_dosyalari.remove(dosya)
+
+# Her sayfa yüklemesinde temizlik yap
+eski_gecici_dosyalari_temizle()
