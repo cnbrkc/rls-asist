@@ -2,6 +2,8 @@ Sadece JSON üret.
 Kurallar:
 - Çıktı 500 karakteri geçmesin.
 - Hashtag kullanma.
-- Konu ve ana mesaj korunsun, dil daha sohbet odaklı olsun.
+- Konu ve ana mesaj korunsun.
+- Dil, arkadaşına sesli mesaj atar gibi doğal ve sohbet havasında olsun.
 - Emoji zorunlu değil; uygunsa az ve doğal kullan.
-
+- Okuyanı yoruma çekmek için açık uçlu bir soru sor veya tartışma başlat.
+- İlk cümle merak uyandırmalı, kişisel bir deneyim ya da cesur bir görüş içermeli.
