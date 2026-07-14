@@ -143,8 +143,6 @@ MAX_INPUT_KARAKTER = 900_000
 # ------------------------------------------------------------
 # GÜNCELLİK DESTEĞİ
 # ------------------------------------------------------------
-GEMINI3_ARAMA_DESTEKLI_ONEK = "gemini-3"
-
 TURKCE_AYLAR = {
     1: "Ocak", 2: "Şubat", 3: "Mart", 4: "Nisan", 5: "Mayıs", 6: "Haziran",
     7: "Temmuz", 8: "Ağustos", 9: "Eylül", 10: "Ekim", 11: "Kasım", 12: "Aralık",
@@ -155,7 +153,8 @@ def guncel_tarih_metni() -> str:
     return f"{simdi.day} {TURKCE_AYLAR[simdi.month]} {simdi.year}"
 
 def model_arama_destekliyor_mu(model_adi: str) -> bool:
-    return model_adi.startswith(GEMINI3_ARAMA_DESTEKLI_ONEK)
+    """Gemini 2.5 Flash ve üstü modeller Google Search aracını destekler"""
+    return model_adi.startswith("gemini-2.5") or model_adi.startswith("gemini-3")
 
 # ------------------------------------------------------------
 # YARDIMCI FONKSİYONLAR
