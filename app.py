@@ -96,11 +96,21 @@ def video_analiz_promptunu_olustur(ek_notlar_bolumu: str, sure_saniye: int) -> s
         sure_saniye=sure_saniye
     )
 
-def sistem_talimati_olustur(sure_saniye: int) -> str:
+def sistem_talimati_olustur(sure_saniye: int, icerik_tonu: str) -> str:
     # Kelime sayısı hesapla (kurallar.txt'deki formül: süre × 2.8 → en yakın 5'in katı)
     hedef_kelime = round(sure_saniye * 2.8 / 5) * 5
     min_kelime = max(5, int(hedef_kelime * 0.9))
     max_kelime = int(hedef_kelime * 1.1)
+    
+    # Bilgi-eğlence oranı belirle
+    if "Eğlence Ağırlıklı" in icerik_tonu:
+        bilgi_orani = "Her 4 cümleden 1'i TEKNİK BİLGİ, 3'ü SAMİMİ YORUM/EĞLENCE. Hikaye, espri, kişisel deneyim, 'düşünsene' anları ağırlıklı. Teknik bilgi sadece vurgu için kullanılmalı."
+    elif "Bilgi Ağırlıklı" in icerik_tonu:
+        bilgi_orani = "Her 4 cümleden 3'ü TEKNİK BİLGİ, 1'i SAMİMİ YORUM. Rakam, karşılaştırma, teknik detay, performans verisi ağırlıklı. Eğlence sadece nefes aldırmak için."
+    elif "Teknik Odaklı" in icerik_tonu:
+        bilgi_orani = "Her 10 cümleden 9'u TEKNİK BİLGİ, 1'i SAMİMİ YORUM. Neredeyse her cümle veri/rakam/karşılaştırma içermeli. Eğlence minimum, bilgi maksimum."
+    else:  # Dengeli (varsayılan)
+        bilgi_orani = "Her 2 cümleden 1'i TEKNİK BİLGİ, 1'i SAMİMİ YORUM. Bilgi ve eğlence dengeli dağılım. Ne çok sıkıcı ne de çok boş."
     
     sablon = prompt_dosyasini_oku("sistem_talimati.txt")
     return sablon.format(
@@ -108,6 +118,7 @@ def sistem_talimati_olustur(sure_saniye: int) -> str:
         kelime_sayisi=hedef_kelime,
         min_kelime=min_kelime,
         max_kelime=max_kelime,
+        bilgi_orani=bilgi_orani,
         guncellik_talimati=guncellik_talimati_uret()
     )
 
@@ -677,6 +688,14 @@ with c2:
 
 sure_saniye = st.number_input("⏱️ Hedef Süre (sn)", min_value=5, max_value=180, value=30, step=5)
 
+# 🎯 YENİ: İÇERİK TONU SEÇİCİ
+icerik_tonu = st.radio(
+    "🎯 İçerik Tonu",
+    ["🎭 Eğlence Ağırlıklı (%25 bilgi)", "⚖️ Dengeli (%50 bilgi)", "🧠 Bilgi Ağırlıklı (%75 bilgi)", "📊 Teknik Odaklı (%90 bilgi)"],
+    index=1,  # Varsayılan: Dengeli
+    horizontal=True
+)
+
 buton_tiklandi = st.button("🚀 ÜRET!", disabled=video_buyuk, use_container_width=True)
 
 # Progress bar
@@ -749,7 +768,7 @@ if buton_tiklandi:
         # ADIM 2: Metin Üretimi (%25-60)
         ilerlemeyi_guncelle(2, 4, "✍️ Metin üretiliyor...")
         BENIM_GEM_KURALLARIM = prompt_dosyasini_oku("kurallar.txt")
-        system_prompt = BENIM_GEM_KURALLARIM + sistem_talimati_olustur(sure_saniye)
+        system_prompt = BENIM_GEM_KURALLARIM + sistem_talimati_olustur(sure_saniye, icerik_tonu)
 
         response_schema = {
             "type": "OBJECT",
