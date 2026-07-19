@@ -84,6 +84,7 @@ COMMENT: İki kampa ayrılma, kişisel deneyim paylaşma dürtüsü.
 5.1 — TEMEL İLKE
 Caption ≠ video transkripi. Video anlatır, caption arka plan/bağlam/ekstra detay verir.
 Videoda söylenen captionda TEKRARLANMAZ, eksik kalan TAMAMLANIR.
+⚠️ HASHTAGLER BURAYA YAZILMAZ. Sistem tarafından otomatik olarak reels_hashtagleri alanından çekilip sonuna eklenecektir.
 
 5.2 — 5 KATMAN (HEPSİ ZORUNLU, katman adları/numaraları çıktıda YAZILMAZ)
 Her paragraf arası 3 boş satır.
@@ -92,7 +93,7 @@ KATMAN 1 — FOLD ÜSTÜ HOOK: MAX 125 karakter. Ana anahtar kelime MUTLAKA geç
 Türler: Şok sonuç, gizli bilgi vaadi, cesur iddia, rakam+merak, gündem bağlantısı, karşılaştırma merakı.
 YASAK: "Yeni video!", video özeti, emoji sıralaması.
 
-KATMAN 2 — BAĞLAM + EKSTRA BİLGİ (4–6 satır): Videonun SÖYLEMEDİĞİ şeyleri anlat. Her 2–3 cümlede satır atla, dikkat tazele. Tamamlama mantığı: video motor anlattıysa caption fiyat/servis, tasarım gösterdiyse bagaj/iç mekan, hız gösterdiyse yakıt/gerçek kullanım versin.
+KATMAN 2 — BAĞLAM + EKSTRA BİLGİ (4–6 satır): Videonun SÖYLEMEDİĞİ şeyleri anlat. Her 2–3 cümlede satır atla, dikkat tazele. Tamamlama mantığı: video motor anlattıysa caption fiyat/servis, tasarım gösterdiysa bagaj/iç mekan, hız gösterdiyse yakıt/gerçek kullanım versin.
 
 KATMAN 3 — İLİŞKİLENDİRME (2–4 satır): Okuyucuyla bağ kur. Teknikler: kimlik, senaryo, nostalji, ortak düşman, "biz" dili, sosyal statü. Her captionda farklı teknik kullan, "Düşünsene" kalıbını tekrarlama.
 
@@ -118,14 +119,14 @@ Güncel bir olay varsa doğal şekilde ekle.
 5.5 — KAYDEDİLEBİLİRLİK
 "Kaydet" demek YASAK. Kaydedilecek BİLGİ ver: fiyat karşılaştırması, teknik özet, "Alırken dikkat et" maddeleri, az bilinen özellik, maliyet hesabı. K2'ye doğal yerleştir.
 
-6. ETİKET (HASHTAG) KURALLARI
-TOPLAM TAM 5 etiket.
+6. ETİKET (HASHTAG) KURALLARI (reels_hashtagleri DİZİSİ İÇİN)
+TOPLAM TAM 5 etiket. Sistem bunları otomatik olarak reels_aciklamasi metninin sonuna ekleyecektir.
 Dağılım: 1 marka (sayfanın kimliğine uygun; genellikle #otoXtra tercih edilir ama içeriğe göre değişebilir), 1–2 geniş konu (1M+ post), 1–2 orta niş (50K–1M post), 1 konu özel (50K altı).
 Hashtag'ler caption anahtar kelimelerini DESTEKLEMELİ, çelişmemeli.
 Türkçe ağırlıklı, MAX 1 İngilizce (sadece uluslararası marka adı). #carlovers #carsofinstagram KULLANMA.
 Türkçe karakter doğru kullan. Karaktersiz versiyon daha aktifse onu tercih et.
 YASAKLI: #keşfet #fyp #foryou #viral #trend #reels #instagram #takip #beğen #like
-Biçim: Küçük harf (özel isimler hariç), tek satır, arası 1 boşluk, captiondan 2 boş satır sonra. Sıra: marka→geniş→orta niş→konu özel.
+Biçim: Küçük harf (özel isimler hariç). Başlarına # işareti KOYMA (sistem otomatik ekler).
 
 7. ENGAGEMENT BAIT YASAĞI
 Tüm çıktı için geçerli.
