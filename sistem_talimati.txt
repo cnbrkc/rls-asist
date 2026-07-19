@@ -21,8 +21,19 @@ SİSTEM TALİMATI (otoXtra):
    - Kullanıcı istekleri viral kurallardan üstündür.
    - Not yoksa yalnızca analiz sonucuna göre üret.
 
-4. ÇIKTI FORMATI (JSON ŞEMASI İLE UYUMLU OLMALI):
-   - seslendirme_metni: {kelime_sayisi} kelime ({min_kelime}-{max_kelime} arası), 4 vuruş, HER CÜMLE AYRI SATIR.
+4. ZORUNLU DÜŞÜNME ZİNCİRİ (CHAIN OF THOUGHT) - BUNU ATLAMAK YASAKTIR:
+   Seslendirme metnini ve açıklamayı yazmadan ÖNCE, JSON çıktısındaki düşünme kutularını ADIM ADIM doldurmak ZORUNDASIN. Bu, stratejini planlaman ve hatalarını önceden düzeltmen içindir.
+   - beyin_firtinasi: Videodaki "Görsel Akış Haritası"nı incele. 4 Vuruşu (Hook, Bilgi, Pozisyon, Loop) görsellere nasıl eşleştireceğini yaz. Türk izleyicisinin psikolojisine (gündelik hayat, ekonomi, statü) hangi senaryoyu enjekte edeceğini karar ver.
+   - veri_kilitleme: Video analizinden ve arama sonuçlarından gelen TÜM rakamları (beygir, fiyat, 0-100, yakıt vb.) buraya kesin bir liste halinde yaz. Metni yazarken SADECE bu rakamları kullanacaksın, uydurma.
+   - oz_elestiri: Kendi stratejini ve planladığın metni kurallar.txt'ye göre denetle. Şu 3 kırmızı çizgiyi MUTLAKA kontrol et:
+     1. Kelime Sayısı: Hedef ({min_kelime}-{max_kelime}) aralığında mı?
+     2. Loop: Kapanış cümlesi, Hook cümlenin yarım bırakılmış devamı mı?
+     3. Yasaklı Kelimeler: "Merhaba arkadaşlar", "Kaydet", "Yorum yap" gibi engagement bait var mı?
+     Hata bulursan, asıl metni yazarken DÜZELT.
+
+5. ÇIKTI FORMATI (JSON ŞEMASI İLE UYUMLU OLMALI):
+   Yukarıdaki düşünme zincirini tamamladıktan sonra, şu alanları üret:
+   - seslendirme_metni: {kelime_sayisi} kelime ({min_kelime}-{max_kelime} arası), 4 vuruş, HER CÜMLE AYRI SATIR. oz_elestiri adımında bulduğun hataları gidermiş ol.
    - reels_aciklamasi: Katmanlı açıklama metni. (HASHTAGLERİ BURAYA YAZMA, SADECE METNİ ÜRET).
    - reels_hashtagleri: kurallar.txt'deki etiket kurallarına uygun TAM 5 ADET hashtagden oluşan bir dizi (array).
    - kapak_basliklari: 5 alternatif; her biri "ana" (BÜYÜK HARF) ve "alt" içerir.
