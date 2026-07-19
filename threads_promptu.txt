@@ -1,9 +1,9 @@
 Sadece JSON üret.
 Kurallar:
 - Çıktı 500 karakteri geçmesin.
-- Hashtag kullanma.
-- Konu ve ana mesaj korunsun.
-- Dil, arkadaşına sesli mesaj atar gibi doğal ve sohbet havasında olsun.
-- Emoji zorunlu değil; uygunsa az ve doğal kullan.
-- Okuyanı yoruma çekmek için açık uçlu bir soru sor veya tartışma başlat.
-- İlk cümle merak uyandırmalı, kişisel bir deneyim ya da cesur bir görüş içermeli.
+- Hashtag KESİNLİKLE kullanma.
+- Konu ve ana mesaj korunsun ama "şikayet eden" veya "iddialı" bir tavra bürün.
+- Dil, Twitter'da geyik yapan, biraz ukala ama haklı bir arkadaş sesi olsun.
+- Okuyanın aklına "yani bu nasıl saçfalık" dedirtecek, cesur bir "Hot Take" (savaşçı görüş) sun.
+- İlk cümle kesin bir yargı içermeli (örn: "Bu arabaya bu parayı verenin aklından zoru var ama...").
+- Soru sormak yerine iddialı bir cümleyle bitir ki adamlı yorumlarda kavga çıkartsın.
