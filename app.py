@@ -828,7 +828,8 @@ GÖREV: Bu Instagram açıklamasını Threads ve X için daha sohbet havasında,
             veri["threads_aciklamasi"] = str(threads_veri.get("threads_aciklamasi", "")).strip()
         except Exception as threads_hata:
             log_ekle(f"⚠️ Threads hatası, fallback kullanılıyor: {str(threads_hata)[:100]}")
-            fallback = re.sub(r"#\w+", "", veri.get("reels_aciklamasi", "")).strip()
+            # HASHTAG SİLME MANTIĞI KALDIRILDI, ÇÜNKÜ ARTIK AÇIKLAMADA HASHTAG YOK
+            fallback = veri.get("reels_aciklamasi", "").strip()
             fallback = re.sub(r"\s+", " ", fallback).strip()
             veri["threads_aciklamasi"] = fallback[:500].rstrip()
             kullanilan_threads_modeli = "fallback"
