@@ -51,6 +51,7 @@ def kayit_ekle(uretim_verisi: dict) -> None:
         "tarih": datetime.now().strftime("%d %B %Y %H:%M"),
         "seslendirme_metni": uretim_verisi.get("seslendirme_metni", ""),
         "reels_aciklamasi": uretim_verisi.get("reels_aciklamasi", ""),
+        "reels_hashtagleri": uretim_verisi.get("reels_hashtagleri", []),
         "kapak_basliklari": uretim_verisi.get("kapak_basliklari", []),
         "threads_aciklamasi": uretim_verisi.get("threads_aciklamasi", ""),
         "ses_adi": uretim_verisi.get("ses_adi", ""),
@@ -637,6 +638,7 @@ with st.sidebar:
                     "veri": {
                         "seslendirme_metni": kayit.get("seslendirme_metni", ""),
                         "reels_aciklamasi": kayit.get("reels_aciklamasi", ""),
+                        "reels_hashtagleri": kayit.get("reels_hashtagleri", []),
                         "kapak_basliklari": kayit.get("kapak_basliklari", []),
                         "threads_aciklamasi": kayit.get("threads_aciklamasi", ""),
                     },
@@ -775,6 +777,11 @@ if buton_tiklandi:
             "properties": {
                 "seslendirme_metni": {"type": "STRING"},
                 "reels_aciklamasi": {"type": "STRING"},
+                "reels_hashtagleri": {
+                    "type": "ARRAY",
+                    "items": {"type": "STRING"},
+                    "description": "Reels açıklaması için 5 adet ilgili hashtag. Başlarına # işareti ekle."
+                },
                 "kapak_basliklari": {
                     "type": "ARRAY",
                     "items": {
@@ -784,7 +791,7 @@ if buton_tiklandi:
                     },
                 },
             },
-            "required": ["seslendirme_metni", "reels_aciklamasi", "kapak_basliklari"],
+            "required": ["seslendirme_metni", "reels_aciklamasi", "reels_hashtagleri", "kapak_basliklari"],
         }
 
         veri, kullanilan_metin_modeli = router.metin_uret(
@@ -844,6 +851,7 @@ GÖREV: Bu Instagram açıklamasını Threads ve X için daha sohbet havasında,
         kayit_ekle({
             "seslendirme_metni": veri.get("seslendirme_metni", ""),
             "reels_aciklamasi": veri.get("reels_aciklamasi", ""),
+            "reels_hashtagleri": veri.get("reels_hashtagleri", []),
             "kapak_basliklari": veri.get("kapak_basliklari", []),
             "threads_aciklamasi": veri.get("threads_aciklamasi", ""),
             "ses_adi": secilen_ses_ingilizce,
@@ -931,7 +939,20 @@ if st.session_state.sonuc:
     with col1:
         st.subheader("1️⃣ Reels Açıklaması")
         st.caption("Katmanlı caption + 5 hashtag")
-        st.code(markdown_temizle(veri.get("reels_aciklamasi", "")), language=None)
+        
+        # Açıklamayı al
+        aciklama_metni = markdown_temizle(veri.get("reels_aciklamasi", ""))
+        
+        # Hashtagleri al ve birleştir
+        hashtagler = veri.get("reels_hashtagleri", [])
+        if hashtagler and isinstance(hashtagler, list):
+            # Başında # olmayanlara ekle
+            hashtag_str = " ".join([h if str(h).startswith("#") else f"#{h}" for h in hashtagler])
+            tam_aciklama = f"{aciklama_metni}\n\n{hashtag_str}"
+        else:
+            tam_aciklama = aciklama_metni
+            
+        st.code(tam_aciklama, language=None)
 
     with col2:
         st.subheader("2️⃣ Kapak Başlıkları")
