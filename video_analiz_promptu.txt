@@ -4,27 +4,31 @@ Yüklediğim videoyu kare kare, sesiyle birlikte analiz et. Amacımız bu videod
 {ek_notlar_bolumu}
 {guncellik_talimati}
 
-KRİTİK KURAL — DOĞRULAMA:
-Videoda geçen her türlü marka, model, fiyat, teknik özellik, donanım paketi, motor hacmi, yıl gibi bilgileri google_search aracıyla KESİNLİKLE doğrula.
-Emin olmadığın hiçbir model adını veya rakamı YAZMA. "Muhtemelen", "sanırım" gibi ifadeler KULLANMA.
-Eğer aracın modelini videodan net çıkaramıyorsan, google_search ile doğrulayamıyorsan, sadece "araç" diye bahset, model adı uydurma.
+KRİTİK KURAL — MARKA/MODEL TESPİTİ VE HALÜSİNASYON YASAĞI:
+1. ÖNCELİK KULLANICIYA AİTTİR: Eğer kullanıcı "VİDEO ANALİZ NOTLARI" bölümünde bir marka/model belirttiyse, kesinlikle o modeli baz al ve google_search aracıyla o modelin güncel fiyat/özelliklerini doğrula.
+2. KULLANICI BELİRTMEDİYSE GÖZLE TESPİT ET: Eğer notta yazmıyorsa, videodaki logoları, emniyet kemikleri, gösterge paneli, direk far çizgilerini ve ekrandaki yazıları (OCR) inceleyerek marka/modeli bulmaya çalış. Bulduysan google_search ile teyit et.
+3. BULAMADIYSAN DUR BAKALIM: Eğer videodan ve notlardan marka/model KESİNLİKLE çıkaramıyorsan,_model adı uydurma. Sadece "araç" diye bahset.
+4. UYDURMA KESİNLİKLE YASAKTIR (HALÜSİNASYON ENGELİ): Videoda veya aramada olmadığı sürece HİÇBİR rakam, fiyat, beygir, motor hacmi, donanım özelliği UYDURMA. Videoda "büyük ekran" görüyorsan "büyük ekran var" de, "20 inç ekran var" deme. Videoda "dürbülü gösterge" görüyorsan onu söyle, "168 km/s hız" gibi bir detay uydurma. Boşlukları hayal gücünle doldurma.
 
 Bana şu başlıklarda çok net, maddeler halinde rapor ver:
 
 1. GÖRSEL AKIŞ HARİTASI (KRİTİK):
 Videoyu 3 ana kurgu aşamasına böl. (Video sonradan hızlandırılıp yavaşlatılacağı için saniyeler değil, GÖRSEL GEÇİŞLER önemli). Seslendirme metni yazılırken bu görsel akışa uyulacak.
-- AÇILIŞ GÖRSELİ (Hook için): Videonun başındaki dikkat çekici ilk görsel/aksiyon nedir? (Örn: Araba farları yanıyor, dış çekim).
-- ORTA GÖRSEL (Veri/Bilgi için): Videonun gelişme kısmındaki en çarpıcı detay nedir? (Örn: Gösterge paneli, iç mekan, hızlanma).
-- KAPANIŞ GÖRSELİ (Loop/CTA için): Videonun sonundaki final hareketi nedir? (Örn: Aracın burnu düşüyor, virajı kesiyor).
+- AÇILIŞ GÖRSELİ (Hook için): Videonun başındaki dikkat çekici ilk görsel/aksiyon nedir?
+- ORTA GÖRSEL (Veri/Bilgi için): Videonun gelişme kısmındaki en çarpıcı detay nedir?
+- KAPANIŞ GÖRSELİ (Loop/CTA için): Videonun sonundaki final hareketi nedir?
 
-2. VİRAL DETAYLAR & TÜRK İZLEYİCİSİ KANCASI: Türk izleyicisinin gözünü durduracak spesifik detaylar. (Bu detayları GÖRSEL AKIŞ HARİTASI ile ilişkilendir).
+2. TESPİT EDİLEN VERİLER (SADECE TEYİT EDİLENLER):
+Marka, model, videoda görünen kesin özellikler ve google_search ile doğrulanmış güncel rakamlar (Eğer hiç tespit edilemediyse "Veri tespit edilemedi, sadece görsel betimleme yapılacak" yaz).
 
-3. KURGU & HIZLANDIRMA STRATEJİSİ: En vurucu 3-4 görsel an, seslendirme temposu notu.
+3. VİRAL DETAYLAR & TÜRK İZLEYİCİSİ KANCASI: Türk izleyicisinin gözünü durduracak spesifik detaylar. (Bu detayları GÖRSEL AKIŞ HARİTASI ile ilişkilendir).
 
-4. HOOK (GİRİŞ KANCASI) ÖNERİSİ: İlk 3 saniyede kaydırmayı durduracak, AÇILIŞ GÖRSELİYLE uyumlu cesur cümle.
+4. KURGU & HIZLANDIRMA STRATEJİSİ: En vurucu 3-4 görsel an, seslendirme temposu notu.
 
-5. KANIŞTIRICI KAPANIŞ (CTA/LOOP) ÖNERİSİ: Son 3 saniyede yorum tetikleyecek, KAPANIŞ GÖRSELİYLE uyumlu, yarım kalmış (loop) cümle.
+5. HOOK (GİRİŞ KANCASI) ÖNERİSİ: İlk 3 saniyede kaydırmayı durduracak, AÇILIŞ GÖRSELİYLE uyumlu cesur cümle.
 
-6. DUYGU AKIŞI: Görsel akışa uygun duygu haritası (Örn: Açılış-merak, Orta-şok, Kapanış-tartışma). Seslendirme metni bu duygu akışına uygun tonlanmalı.
+6. KANIŞTIRICI KAPANIŞ (CTA/LOOP) ÖNERİSİ: Son 3 saniyede yorum tetikleyecek, KAPANIŞ GÖRSELİYLE uyumlu, yarım kalmış (loop) cümle.
+
+7. DUYGU AKIŞI: Görsel akışa uygun duygu haritası (Örn: Açılış-merak, Orta-şok, Kapanış-tartışma).
 
 Bu bilgileri ham veri olarak ver. Ekstra konuşma yapma.
