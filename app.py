@@ -133,9 +133,10 @@ COOLDOWN_FREE_TIER_YOK = 7 * 24 * 60 * 60
 IP_BAN_KORUMA = 1.0
 QUOTA_RETRY_DEFAULT = 60
 
-METIN_MODELLERI = ["gemini-2.5-flash"]
+# GÜNCELLENMİŞ MODEL LİSTESİ (Yedekler Eklendi)
+METIN_MODELLERI = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
 SES_MODELLERI = ["gemini-2.5-flash-preview-tts"]
-VIDEO_ANALIZ_MODELLERI = ["gemini-2.5-flash"]
+VIDEO_ANALIZ_MODELLERI = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
 MAX_INPUT_KARAKTER = 900_000
 
 TURKCE_AYLAR = {
@@ -240,7 +241,7 @@ def sekmeyi_aktif_tut() -> None:
     """, height=0)
 
 # ------------------------------------------------------------
-# AKILLI ROUTER
+# AKILLI ROUTER (503 Mantığı Senin Fikrinle Güncellendi)
 # ------------------------------------------------------------
 class SmartRouter:
     def __init__(self) -> None:
@@ -274,7 +275,8 @@ class SmartRouter:
     def _parse_hata(self, hata_metni: str) -> Tuple[str, int]:
         if "limit: 0" in hata_metni or "limit\": 0" in hata_metni: return "free_tier_yok", COOLDOWN_FREE_TIER_YOK
         if "429" in hata_metni or "resource_exhausted" in hata_metni or "quota" in hata_metni: return "quota", 0
-        if "503" in hata_metni or "unavailable" in hata_metni: return "model", COOLDOWN_SUNUCU
+        # 503 artık modeli banlamıyor, combo olarak işaretlenip diğer key denenecek
+        if "503" in hata_metni or "unavailable" in hata_metni: return "combo", COOLDOWN_SUNUCU
         if "404" in hata_metni or "not_found" in hata_metni: return "model", COOLDOWN_BULUNAMADI
         return "combo", COOLDOWN_DIGER
 
@@ -300,6 +302,7 @@ class SmartRouter:
             time.sleep(IP_BAN_KORUMA)
             return "break_model"
         else:
+            # 503 ve diğer hatalar buraya düşüyor, sadece bu key+model ikilisini banlayıp diğer key'i deneyecek
             log_ekle(f" ⚠️ {mail} hatası → {model} ile {ban_sure} banlandı, diğer key deneniyor")
             self._ban(mail, model, cooldown, scope)
             time.sleep(IP_BAN_KORUMA)
@@ -633,7 +636,6 @@ if buton_tiklandi:
         }
 
     except Exception as e:
-        # ESKİ SİSTEMİNE GERİ DÖNDÜRÜLDÜ (SÜRÜM UYUMLU HALİ)
         if "StopException" in type(e).__name__ or "RerunException" in type(e).__name__ or "StopExecution" in str(type(e)):
             raise
 
