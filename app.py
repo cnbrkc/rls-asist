@@ -26,7 +26,6 @@ MAX_KAYIT = 5
 SES_OMRU_SANIYE = 24 * 60 * 60  # 24 saat
 
 def kayitlari_yukle() -> List[dict]:
-    """JSON dosyasından kayıtları yükle, bozuksa sıfırla"""
     try:
         if os.path.exists(KAYIT_DOSYASI):
             with open(KAYIT_DOSYASI, "r", encoding="utf-8") as f:
@@ -241,7 +240,7 @@ def sekmeyi_aktif_tut() -> None:
     """, height=0)
 
 # ------------------------------------------------------------
-# AKILLI ROUTER (Temizlenmiş ve Optimize Edilmiş)
+# AKILLI ROUTER
 # ------------------------------------------------------------
 class SmartRouter:
     def __init__(self) -> None:
@@ -307,7 +306,6 @@ class SmartRouter:
             return "devam"
 
     def _make_request(self, model_listesi: List[str], contents: any, config: types.GenerateContentConfig, log_ekle) -> Tuple[any, str]:
-        """Tüm API isteklerini yöneten ortak fonksiyon (DRY Prensibi)"""
         son_hata = None
         for model_adi in model_listesi:
             log_ekle(f"🧠 Model deneniyor: {model_adi}")
@@ -634,9 +632,11 @@ if buton_tiklandi:
             "kullanilan_threads_modeli": kullanilan_threads_modeli,
         }
 
-    except (st.errors.StopException, st.errors.RerunException):
-        raise
     except Exception as e:
+        # ESKİ SİSTEMİNE GERİ DÖNDÜRÜLDÜ (SÜRÜM UYUMLU HALİ)
+        if "StopException" in type(e).__name__ or "RerunException" in type(e).__name__ or "StopExecution" in str(type(e)):
+            raise
+
         hata_detay = traceback.format_exc()
         for api_key in API_KEYS.values():
             hata_detay = hata_detay.replace(api_key, "***")
