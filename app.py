@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import List, Tuple
 
 # ============================================================
-# otoXtra — Otomatik Reels + Threads Asistanı
+# otoXtra — Otomatik Reels Asistanı
 # ============================================================
 
 # ------------------------------------------------------------
