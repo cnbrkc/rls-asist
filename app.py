@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import List, Tuple
 
 # ============================================================
-# otoXtra — Otomatik Reels Asistanı
+# otoXtra — Otomatik Reels + Threads Asistanı
 # ============================================================
 
 # ------------------------------------------------------------
@@ -133,10 +133,16 @@ COOLDOWN_FREE_TIER_YOK = 7 * 24 * 60 * 60
 IP_BAN_KORUMA = 1.0
 QUOTA_RETRY_DEFAULT = 60
 
-# GÜNCELLENMİŞ MODEL LİSTESİ (Yeni Nesil 3.6 ve Yedekleri Eklendi)
-METIN_MODELLERI = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-3.5-flash-lite"]
+# STRATEJİK MODEL LİSTESİ (İş Bölümü Yapıldı)
+# 1. Video Analiz: En zeki modeller (3.6 -> 2.5)
+VIDEO_ANALIZ_MODELLERI = ["gemini-3.6-flash", "gemini-2.5-flash"]
+
+# 2. Metin Üretimi: Zeki modeller + Kota Limiti Yüksek Yedekler (500 RPD)
+METIN_MODELLERI = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
+
+# 3. Ses Üretimi: TTS Modelleri
 SES_MODELLERI = ["gemini-2.5-flash-preview-tts"]
-VIDEO_ANALIZ_MODELLERI = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-3.5-flash-lite"]
+
 MAX_INPUT_KARAKTER = 900_000
 
 TURKCE_AYLAR = {
@@ -241,7 +247,7 @@ def sekmeyi_aktif_tut() -> None:
     """, height=0)
 
 # ------------------------------------------------------------
-# AKILLI ROUTER (503 Mantığı Güncellendi)
+# AKILLI ROUTER
 # ------------------------------------------------------------
 class SmartRouter:
     def __init__(self) -> None:
