@@ -5,16 +5,25 @@ Yüklediğim videoyu kare kare, sesiyle birlikte analiz et. Amacımız bu videod
 {guncellik_talimati}
 
 KRİTİK GÖREV 1 — MARKA/MODEL TESPİTİ VE HALÜSİNASYON YASAĞI:
-1. ÖNCELİK KULLANICIYA AİTTİR: Eğer kullanıcı "VİDEO ANALİZ NOTLARI" bölümünde bir marka/model belirttiyse, kesinlikle o modeli baz al.
-2. KULLANICI BELİRTMEDİYSE GÖZLE TESPİT ET: Eğer notta yazmıyorsa, videodaki logoları, emniyet kemikleri, gösterge paneli, far çizgilerini ve ekrandaki yazıları (OCR) inceleyerek marka/modeli bulmaya çalış. 
+1. ÖNCELİK KULLANICIYA AİTTİR: Eğer kullanıcı "VİDEO ANALİZ NOTLARI" bölümünde bir marka/model belirttiyse, kesinlikle o modeli baz al. Kullanıcının yazdığı model adını BİREBİR kullan, kısaltma, değiştirme, benzer modele yuvarlama.
+2. KULLANICI BELİRTMEDİYSE GÖZLE TESPİT ET: Eğer notta yazmıyorsa, videodaki logoları, emniyet kemikleri, gösterge paneli, far çizgilerini ve ekrandaki yazıları (OCR) inceleyerek marka/modeli bulmaya çalış.
 3. BULAMADIYSAN: Eğer videodan ve notlardan marka/model KESİNLİKLE çıkaramıyorsan, model adı uydurma. Sadece "araç" diye bahset.
 4. UYDURMA YASAKTIR: Videoda veya aramada olmadığı sürece HİÇBİR rakam uydurma. (Eğer marka/model tespit edemediysen internetten o araca ait fiyat/özellik UYDURMA, sadece videodaki görsel özellikleri belirt).
+
+⚠️ BENZER MODEL TUZAĞI (KIRMIZI ÇİZGİ):
+- "BYD Tang" ≠ "BYD Great Tang". "Toyota Corolla" ≠ "Toyota Corolla Cross". "BMW 3 Serisi" ≠ "BMW 3 Serisi GT". Model adındaki HER kelime ve takı (Pro, Plus, Max, Great, Cross, GT, EV, DM-i, PHEV) FARKLI bir araca işaret eder.
+- Kullanıcı "Great Tang" dediyse, arama yaparken "BYD Great Tang" diye arat. "BYD Tang" sonuçlarını "Great Tang"e UYGULAMA.
+- Eğer aramada TAM model adıyla sonuç bulamıyorsan, "Bu model hakkında yeterli veri bulunamadı" de ve benzer modelin verilerini KULLANMA.
+
+⚠️ TÜRKİYE SATIŞ KONTROLÜ:
+- Fiyat/vergi bilgisi vermeden önce modelin Türkiye'de resmi satışı olup olmadığını KONTROL ET.
+- Türkiye'de satılmıyorsa: "Türkiye'de resmi satışı yok" de. Çin/global fiyatını verebilirsin ama TL fiyat/ÖTV/MTV UYDURMA.
 
 KRİTİK GÖREV 2 — VİRAL VERİ TOPLAMA (GOOGLE SEARCH ZORUNLU):
 Eğer marka/modeli tespit ettiysen (kullanıcı yazdıysa veya sen bulduysan), HEMEN google_search aracını kullanarak bu araçla ilgili TÜRKİYE'DE gündem olan, gündem olacak veya bilinmeyen viral verileri topla. Sadece fiyat/sıfır km bilgisi yetmez. Şunları araştır:
 - Bu aracın bilinen en büyük kusuru/sıkıntısı nedir? (Kamplara bölmek için)
 - Bu aracın "fısıltı etkisi" yaratacak az bilinen bir özelliği var mı?
-- Türkiye'deki güncel fiyatı, 2. el piyasası veya ÖTV/MTV durumu nedir?
+- Türkiye'deki güncel fiyatı, 2. el piyasası veya ÖTV/MTV durumu nedir? (SADECE Türkiye'de satılıyorsa)
 - Rakip bir araçla kıyaslandığında ezdiği veya ezildiği nokta nedir?
 Bu bilgiyi "VİRAL DETAYLAR" bölümüne kesinlikle ekle. Eğer marka/model bilinmiyorsa, sadece kategori üzerinden (örn: elektrikli SUV, sedan) Türkiye'deki genel gündemi araştır.
 
@@ -30,13 +39,13 @@ Videoyu 3 ana kurgu aşamasına böl. (Video sonradan hızlandırılıp yavaşla
 Türk izleyicisinin gözünü durduracak spesifik görsel detaylar VE Görev 2'de google_search ile bulduğun VİRAL VERİLER (gizli kusurlar, ilginç özellikler, fiyat/gündem yorumu). Bunlar metne mutlaka entegre edilecek.
 
 3. TESPİT EDİLEN TEKNİK VERİLER:
-Marka, model, videoda görünen kesin özellikler ve google_search ile doğrulanmış güncel rakamlar (Eğer hiç tespit edilemediyse "Veri tespit edilemedi, sadece görsel betimleme yapılacak" yaz).
+Marka, model (TAM ADIYLA), videoda görünen kesin özellikler ve google_search ile doğrulanmış güncel rakamlar. Türkiye'de satışı yoksa bunu AÇIKÇA belirt. (Eğer hiç tespit edilemediyse "Veri tespit edilemedi, sadece görsel betimleme yapılacak" yaz).
 
 4. KURGU & HIZLANDIRMA STRATEJİSİ: En vurucu 3-4 görsel an, seslendirme temposu notu.
 
 5. HOOK (GİRİŞ KANCASI) ÖNERİSİ: İlk 3 saniyede kaydırmayı durduracak, AÇILIŞ GÖRSELİYLE ve VİRAL VERİLERLE uyumlu cesur cümle.
 
-6. KANIŞTIRICI KAPANIŞ (CTA/LOOP) ÖNERİSİ: Son 3 saniyede yorum tetikleyecek, KAPANIŞ GÖRSELİYLE uyumlu, yarım kalmış (loop) cümle.
+6. KANIŞTIRICI KAPANIŞ (CTA/LOOP) ÖNERİSİ: Son 3 saniyede yorum tetikleyecek, KAPANIŞ GÖRSELİYLE uyumlu cümle.
 
 7. DUYGU AKIŞI: Görsel akışa uygun duygu haritası (Örn: Açılış-merak, Orta-şok, Kapanış-tartışma).
 
