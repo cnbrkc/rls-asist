@@ -117,27 +117,22 @@ def video_analiz_promptunu_hazirla(ek_notlar: str, sure_saniye: int) -> str:
 
 
 # ============================================================
-# API KEY + TELEGRAM YAPILANDIRMASI
-# Önce environment variables (Codespaces secrets), sonra st.secrets
+# API KEY + TELEGRAM YAPILANDIRMASI (Streamlit Secrets)
 # ============================================================
 try:
     GEMINI_KEYS = dict(st.secrets["GEMINI_KEYS"])
 except Exception:
     GEMINI_KEYS = {}
 
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-if not TELEGRAM_BOT_TOKEN:
-    try:
-        TELEGRAM_BOT_TOKEN = str(st.secrets["TELEGRAM_BOT_TOKEN"])
-    except Exception:
-        TELEGRAM_BOT_TOKEN = ""
+try:
+    TELEGRAM_BOT_TOKEN = str(st.secrets["TELEGRAM_BOT_TOKEN"])
+except Exception:
+    TELEGRAM_BOT_TOKEN = ""
 
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
-if not TELEGRAM_CHAT_ID:
-    try:
-        TELEGRAM_CHAT_ID = str(st.secrets["TELEGRAM_CHAT_ID"])
-    except Exception:
-        TELEGRAM_CHAT_ID = ""
+try:
+    TELEGRAM_CHAT_ID = str(st.secrets["TELEGRAM_CHAT_ID"])
+except Exception:
+    TELEGRAM_CHAT_ID = ""
 
 
 # ============================================================
@@ -502,7 +497,7 @@ with st.sidebar:
 
     st.markdown("**🔑 API Durumu**")
     if not GEMINI_KEYS:
-        st.error("⛔ API key bulunamadı! `.streamlit/secrets.toml` dosyasını kontrol edin.")
+        st.error("⛔ API key bulunamadı! Streamlit Secrets'ı kontrol edin.")
     else:
         for mail in GEMINI_KEYS:
             st.caption(f"✅ {mail[:3]}***")
@@ -512,12 +507,11 @@ with st.sidebar:
 
     st.divider()
 
-    # Telegram Durumu (secrets'tan otomatik okunur)
     st.markdown("**📤 Telegram**")
     if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
         st.caption("✅ Telegram bağlı")
     else:
-        st.warning("⚠️ Codespaces secrets'a TELEGRAM_BOT_TOKEN ve TELEGRAM_CHAT_ID ekle")
+        st.warning("⚠️ Streamlit Secrets'a TELEGRAM_BOT_TOKEN ve TELEGRAM_CHAT_ID ekle")
 
     st.divider()
 
@@ -778,7 +772,7 @@ if st.session_state.sonuc:
                 st.warning(f"⚠️ {tg_sonuc['basarili']} gönderildi, {tg_sonuc['basarisiz']} başarısız.")
                 st.caption(" | ".join(tg_sonuc["detay"]))
     else:
-        st.info("📤 Telegram için: GitHub → Settings → Codespaces → Secrets'a TELEGRAM_BOT_TOKEN ve TELEGRAM_CHAT_ID ekle.")
+        st.info("📤 Telegram için: Streamlit Cloud → Settings → Secrets'a TELEGRAM_BOT_TOKEN ve TELEGRAM_CHAT_ID ekle.")
 
     # --- SES ---
     c1, c2 = st.columns([3, 1])
