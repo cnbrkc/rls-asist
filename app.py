@@ -13,6 +13,7 @@ import uuid
 import base64
 from datetime import datetime
 from typing import List, Tuple
+import requests
 
 # ============================================================
 # otoXtra — Otomatik Reels + Threads Asistanı
@@ -113,15 +114,34 @@ def sistem_talimati_olustur(sure_saniye: int, icerik_tonu: str) -> str:
     )
 
 # ------------------------------------------------------------
-# API KEY YAPILANDIRMASI
+# API KEY YAPILANDIRMASI (GitHub Secrets + Environment Variables)
 # ------------------------------------------------------------
+# Önce GitHub Secrets'tan (st.secrets), yoksa ortam değişkeninden (os.environ) al
 try:
+    # GitHub Secrets'tan dene
     API_KEYS = dict(st.secrets["GEMINI_KEYS"])
     if not API_KEYS:
         raise ValueError("API_KEYS boş")
-except Exception as e:
-    st.error(f"🔑 API anahtarları bulunamadı: {e}")
-    st.stop()
+except Exception:
+    # Eğer Secrets yoksa, ortam değişkeninden al (GitHub Actions/Codespaces için)
+    gemini_key_from_env = os.getenv("GEMINI_API_KEY", "")
+    if gemini_key_from_env:
+        API_KEYS = {"primary": gemini_key_from_env}
+    else:
+        st.error("🔑 API anahtarları bulunamadı! Lütfen GitHub Secrets'a 'GEMINI_KEYS' ekleyin veya 'GEMINI_API_KEY' ortam değişkeni tanımlayın.")
+        st.stop()
+
+# ------------------------------------------------------------
+# TELEGRAM AYARLARI (GitHub Secrets + Environment Variables)
+# ------------------------------------------------------------
+try:
+    # GitHub Secrets'tan dene
+    TELEGRAM_BOT_TOKEN = st.secrets["TELEGRAM"]["BOT_TOKEN"]
+    TELEGRAM_CHAT_ID = st.secrets["TELEGRAM"]["CHAT_ID"]
+except Exception:
+    # Eğer Secrets yoksa, ortam değişkenlerinden al
+    TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 # ------------------------------------------------------------
 # AYARLAR VE SABİTLER
@@ -245,6 +265,82 @@ def sekmeyi_aktif_tut() -> None:
     keepAlive();
     </script>
     """, height=0)
+
+# ------------------------------------------------------------
+# TELEGRAM YARDIMCI FONKSİYONLARI
+# ------------------------------------------------------------
+def telegram_gonder_mesaj(mesaj: str, parse_mode: str = "HTML") -> bool:
+    """Telegram'a metin mesajı gönderir"""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return False
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        data = {
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": mesaj,
+            "parse_mode": parse_mode
+        }
+        response = requests.post(url, json=data, timeout=30)
+        return response.status_code == 200
+    except Exception:
+        return False
+
+def telegram_gonder_ses(dosya_yolu: str, aciklama: str = "") -> bool:
+    """Telegram'a ses dosyası gönderir"""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return False
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendVoice"
+        with open(dosya_yolu, "rb") as f:
+            files = {"voice": f}
+            data = {"chat_id": TELEGRAM_CHAT_ID, "caption": aciklama}
+            response = requests.post(url, files=files, data=data, timeout=60)
+        return response.status_code == 200
+    except Exception:
+        return False
+
+def telegrama_guncelleme_gonder(veri: dict, ses_dosyasi: str, ses_basarili: bool) -> None:
+    """Tüm içerikleri Telegram'a ayrı ayrı mesajlar olarak gönderir"""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+    
+    # 1. Ses dosyasını gönder
+    if ses_basarili and os.path.exists(ses_dosyasi):
+        telegram_gonder_ses(ses_dosyasi, "🎙️ Seslendirme Metni")
+    
+    # 2. Seslendirme metnini gönder
+    ses_metni = veri.get("seslendirme_metni", "")
+    if ses_metni:
+        telegram_gonder_mesaj(f"📝 *Seslendirme Metni:*\n\n{ses_metni}", parse_mode="Markdown")
+    
+    # 3. Reels açıklamasını gönder
+    reels_aciklama = veri.get("reels_aciklamasi", "")
+    reels_hashtagleri = veri.get("reels_hashtagleri", [])
+    if reels_aciklama:
+        hashtag_str = " ".join([h if str(h).startswith("#") else f"#{h}" for h in reels_hashtagleri]) if reels_hashtagleri else ""
+        tam_reels = f"{reels_aciklama}\n\n{hashtag_str}" if hashtag_str else reels_aciklama
+        telegram_gonder_mesaj(f"📱 *Reels Açıklaması:*\n\n{tam_reels}", parse_mode="Markdown")
+    
+    # 4. Kapak başlıklarını gönder
+    kapak_basliklari = veri.get("kapak_basliklari", [])
+    if kapak_basliklari:
+        kapak_metni = "🎬 *Kapak Başlıkları:*\n\n"
+        for i, secenek in enumerate(kapak_basliklari, start=1):
+            if isinstance(secenek, dict):
+                ana = markdown_temizle(str(secenek.get("ana", "")))
+                alt = markdown_temizle(str(secenek.get("alt", "")))
+                kapak_metni += f"{i}) {ana}"
+                if alt:
+                    kapak_metni += f"\n   {alt}"
+                kapak_metni += "\n\n"
+            else:
+                kapak_metni += f"{i}) {markdown_temizle(str(secenek))}\n\n"
+        telegram_gonder_mesaj(kapak_metni, parse_mode="Markdown")
+    
+    # 5. Threads açıklamasını gönder
+    threads_aciklama = veri.get("threads_aciklamasi", "")
+    if threads_aciklama:
+        telegram_gonder_mesaj(f"🧵 *Threads Açıklaması:*\n\n{threads_aciklama}", parse_mode="Markdown")
 
 # ------------------------------------------------------------
 # AKILLI ROUTER
@@ -630,6 +726,11 @@ if buton_tiklandi:
             "ses_adi": secilen_ses_ingilizce,
             "sure_saniye": sure_saniye,
         })
+
+        # Telegram'a gönder
+        telegrama_guncelleme_gonder(veri, ses_dosyasi, ses_basarili)
+        if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+            log_ekle("📤 İçerikler Telegram'a gönderildi!")
 
         st.session_state.sonuc = {
             "veri": veri, "ses_basarili": ses_basarili, "ses_dosyasi": ses_dosyasi,
