@@ -11,6 +11,7 @@ import wave
 import tempfile
 import uuid
 import base64
+import subprocess
 from datetime import datetime
 from typing import List, Tuple
 
@@ -24,6 +25,53 @@ from typing import List, Tuple
 KAYIT_DOSYASI = "kayitlar.json"
 MAX_KAYIT = 5
 SES_OMRU_SANIYE = 24 * 60 * 60  # 24 saat
+
+# TTS çıktısı üretimden sonra bu oranla hızlandırılır.
+# ffmpeg atempo: pitch'i (tonu) KORUR, sadece tempoyu artırır → ses kalitesi bozulmaz.
+# 1.2 = %20 daha hızlı. 0.5-2.0 arası güvenli aralık.
+SES_HIZ_CARpanI = 1.2
+
+def sesi_hizlandir(giris_dosyasi: str, cikti_dosyasi: str, hiz_carpani: float, log_ekle) -> bool:
+    """TTS ile üretilen WAV dosyasını ffmpeg atempo ile hızlandırır.
+    Pitch korunur, sadece tempo değişir. Ses kalitesi korunur."""
+    if abs(hiz_carpani - 1.0) < 0.001:
+        # 1.0 ise hızlandırma yapma, dosyayı olduğu gibi kopyala
+        try:
+            import shutil
+            shutil.copy2(giris_dosyasi, cikti_dosyasi)
+            return True
+        except Exception as e:
+            log_ekle(f"⚠️ Ses kopyalanamadı: {e}")
+            return False
+
+    # atempo 0.5-2.0 aralığını destekler. Daha fazlası için zincirleme kullanılır.
+    # 1.2 tek filtrede rahat çalışır.
+    komut = [
+        "ffmpeg", "-y", "-i", giris_dosyasi,
+        "-filter:a", f"atempo={hiz_carpani}",
+        "-ar", "24000", "-ac", "1", "-sample_fmt", "s16",
+        cikti_dosyasi
+    ]
+    try:
+        sonuc = subprocess.run(
+            komut,
+            capture_output=True,
+            text=True,
+            timeout=120
+        )
+        if sonuc.returncode != 0:
+            log_ekle(f"⚠️ ffmpeg hata: {sonuc.stderr[-300:] if sonuc.stderr else 'bilinmeyen'}")
+            return False
+        return True
+    except FileNotFoundError:
+        log_ekle("⚠️ ffmpeg bulunamadı! Sunucuda kurulu olması gerekir.")
+        return False
+    except subprocess.TimeoutExpired:
+        log_ekle("⚠️ ffmpeg zaman aşımına uğradı.")
+        return False
+    except Exception as e:
+        log_ekle(f"⚠️ ffmpeg beklenmeyen hata: {e}")
+        return False
 
 def kayitlari_yukle() -> List[dict]:
     try:
@@ -89,7 +137,7 @@ def video_analiz_promptunu_olustur(ek_notlar_bolumu: str, sure_saniye: int) -> s
     )
 
 def sistem_talimati_olustur(sure_saniye: int, icerik_tonu: str) -> str:
-    hedef_kelime = round(sure_saniye * 2.8 / 5) * 5
+    hedef_kelime = round(sure_saniye * 2.7 / 5) * 5
     min_kelime = max(5, int(hedef_kelime * 0.9))
     max_kelime = int(hedef_kelime * 1.1)
     
@@ -360,7 +408,7 @@ class SmartRouter:
         response, info = self._make_request(model_listesi, video_icerigi, config, log_ekle)
         return guvenli_json_yukle(getattr(response, "text", "")), info
 
-    def ses_uret(self, metin: str, ses_adi: str, cikti_dosyasi: str, log_ekle) -> Tuple[bool, str]:
+    def ses_uret(self, metin: str, ses_adi: str, cikti_dosyasi: str, log_ekle, hiz_carpani: float = 1.0) -> Tuple[bool, str]:
         config = types.GenerateContentConfig(
             response_modalities=["AUDIO"],
             speech_config=types.SpeechConfig(
@@ -388,12 +436,37 @@ class SmartRouter:
             if isinstance(audio_data, str):
                 audio_data = base64.b64decode(audio_data)
 
-            with wave.open(cikti_dosyasi, "wb") as wf:
-                wf.setnchannels(1)
-                wf.setsampwidth(2)
-                wf.setframerate(24000)
-                wf.writeframes(audio_data)
-            return True, info
+            # Hızlandırma yoksa doğrudan hedef dosyaya yaz.
+            if abs(hiz_carpani - 1.0) < 0.001:
+                with wave.open(cikti_dosyasi, "wb") as wf:
+                    wf.setnchannels(1)
+                    wf.setsampwidth(2)
+                    wf.setframerate(24000)
+                    wf.writeframes(audio_data)
+                return True, info
+
+            # Hızlandırma varsa: önce TTS çıktısını geçici dosyaya yaz, sonra ffmpeg atempo ile
+            # hedef dosyaya dönüştür. Pitch (ton) korunur, sadece tempo değişir → ses kalitesi bozulmaz.
+            gecici_ham_dosya = os.path.join(tempfile.gettempdir(), f"ses_ham_{uuid.uuid4().hex[:8]}.wav")
+            try:
+                with wave.open(gecici_ham_dosya, "wb") as wf:
+                    wf.setnchannels(1)
+                    wf.setsampwidth(2)
+                    wf.setframerate(24000)
+                    wf.writeframes(audio_data)
+
+                log_ekle(f"🎚️ Ses {hiz_carpani}x hızlandırılıyor (ffmpeg atempo, pitch korunur)...")
+                basarili = sesi_hizlandir(gecici_ham_dosya, cikti_dosyasi, hiz_carpani, log_ekle)
+                if not basarili:
+                    log_ekle("⚠️ Hızlandırma başarısız, ham ses kullanılıyor.")
+                    # Fallback: ham dosyayı hedefe kopyala ki en least ses çıksın
+                    import shutil
+                    shutil.copy2(gecici_ham_dosya, cikti_dosyasi)
+                else:
+                    log_ekle(f"✅ Ses {hiz_carpani}x ile hızlandırıldı.")
+                return True, info
+            finally:
+                temp_dosya_temizle(gecici_ham_dosya)
         except Exception as e:
             log_ekle(f"❌ Ses verisi işlenirken hata: {e}")
             return False, None
@@ -613,7 +686,7 @@ if buton_tiklandi:
         ilerlemeyi_guncelle(4, 4, "🎙️ Ses üretiliyor...")
         secilen_ses_ingilizce = ses_secimi.split(" ")[0]
         ses_dosyasi = os.path.join(tempfile.gettempdir(), f"ses_{uuid.uuid4().hex[:8]}.wav")
-        ses_basarili, kullanilan_ses_modeli = router.ses_uret(veri["seslendirme_metni"], secilen_ses_ingilizce, ses_dosyasi, log_ekle)
+        ses_basarili, kullanilan_ses_modeli = router.ses_uret(veri["seslendirme_metni"], secilen_ses_ingilizce, ses_dosyasi, log_ekle, hiz_carpani=SES_HIZ_CARpanI)
 
         if ses_basarili and os.path.exists(ses_dosyasi):
             st.session_state.gecici_ses_dosyalari.append(ses_dosyasi)
@@ -728,7 +801,7 @@ if st.session_state.sonuc:
     if st.button("🔄 Bu Metinle Yeniden Ses Üret"):
         with st.spinner("Ses üretiliyor..."):
             yeni_ses_dosyasi = os.path.join(tempfile.gettempdir(), f"ses_{uuid.uuid4().hex[:8]}.wav")
-            ses_basarili_yeni, _ = router.ses_uret(duzenlenmis_ses_metni, sonuc["secilen_ses_ingilizce"], yeni_ses_dosyasi, log_ekle)
+            ses_basarili_yeni, _ = router.ses_uret(duzenlenmis_ses_metni, sonuc["secilen_ses_ingilizce"], yeni_ses_dosyasi, log_ekle, hiz_carpani=SES_HIZ_CARpanI)
             if ses_basarili_yeni and os.path.exists(yeni_ses_dosyasi):
                 with open(yeni_ses_dosyasi, "rb") as f: yeni_ses_byte = f.read()
                 st.audio(yeni_ses_byte, format="audio/wav")
