@@ -1,4 +1,4 @@
-# 📐 RLS-ASİST (otoXtra) — PROJE ŞEMASI v1.0
+# 📐 RLS-ASİST (otoXtra) — PROJE ŞEMASI v2.0
 
 ## 🗂️ 1. GENEL BAKIŞ
 
@@ -9,7 +9,7 @@
 | **Teknoloji** | Python + Streamlit + Google Gemini AI |
 | **Çalışma Ortamı** | GitHub Codespaces / Dev Container |
 | **Dil** | Python 3.11 |
-| **Toplam Dosya** | 9 dosya + 1 klasör |
+| **Toplam Dosya** | 13 dosya + 1 klasör |
 
 ---
 
@@ -19,7 +19,13 @@
 rls-asist/
 ├── .devcontainer/
 │   └── devcontainer.json        → Codespaces yapılandırması
-├── app.py                       → ANA UYGULAMA (tek dosya, ~550 satır)
+├── app.py                       → ANA UYGULAMA (Streamlit UI, ~418 satır)
+├── router.py                    → SmartRouter (API rotasyonu, ban yönetimi)
+├── prompts.py                   → Prompt yükleme ve dinamik şablon üretimi
+├── storage.py                   → JSON kayıt CRUD işlemleri
+├── config.py                    → Sabitler, API key'leri, model listeleri
+├── utils.py                     → Saf yardımcı fonksiyonlar
+├── telegram.py                  → Telegram Bot API gönderimleri
 ├── kurallar.txt                 → Reels içerik üretim kuralları (prompt)
 ├── sistem_talimati.txt          → Sistem talimatı şablonu (dinamik)
 ├── guncellik_talimati.txt       → Güncellik/doğruluk kuralları (dinamik)
@@ -38,28 +44,64 @@ rls-asist/
 
 ### 3.1 — `app.py` (ANA UYGULAMA)
 
-**Boyut:** ~550 satır, tek dosya monolitik yapı  
+**Boyut:** ~418 satır  
 **Framework:** Streamlit  
-**Sorumluluk:** Tüm iş mantığı + UI + API yönetimi
+**Sorumluluk:** UI + Session State + Pipeline koordinasyonu
 
 #### Bölüm Haritası (Sırayla):
 
 | Satır Aralığı | Bölüm | Açıklama |
 |---|---|---|
-| 1–15 | **Import'lar** | streamlit, google.genai, json, os, re, time, wave, tempfile, uuid, base64, datetime |
-| 17–70 | **KAYIT DOSYASI YARDIMCILARI** | `kayitlar.json` CRUD işlemleri (max 5 kayıt, 24 saat ses ömrü) |
-| 72–115 | **PROMPT YÜKLEME YARDIMCILARI** | `.txt` prompt dosyalarını oku + dinamik şablon doldurma |
-| 117–125 | **API KEY YAPILANDIRMASI** | `st.secrets["GEMINI_KEYS"]` → dict (mail: key) |
-| 127–165 | **AYARLAR VE SABİTLER** | Cooldown süreleri, model listeleri, Türkçe aylar |
-| 167–230 | **YARDIMCI FONKSİYONLAR** | markdown temizleme, JSON parse, temp dosya yönetimi, sekme aktif tutma |
-| 232–370 | **SmartRouter SINIFI** | Akıllı API yönlendirme, ban sistemi, hata yönetimi |
-| 372–400 | **SAYFA AYARLARI + UI INIT** | page_config, session_state başlatma |
-| 402–460 | **SOL MENÜ (Sidebar)** | Ses seçimi, key listesi, ban durumu, geçmiş üretimler |
-| 462–500 | **ANA ARAYÜZ** | Video upload, analiz notları, süre, ton seçimi, ÜRET butonu |
-| 502–600 | **ÜRETİM PIPELINE** | 4 adımlı üretim akışı (analiz → metin → threads → ses) |
-| 602–700 | **SONUÇLAR UI** | Medya oynatma, metin gösterimi, düşünce zinciri, yeniden ses üretimi |
+| 1–22 | **Import'lar** | streamlit, json, datetime, config, storage, prompts, utils, telegram, router |
+| 23–42 | **SAYFA AYARLARI + INIT** | page_config, session_state başlatma, router init |
+| 43–100 | **SOL MENÜ (Sidebar)** | Ses seçimi (11 opsiyon), API durumu, Telegram bağlılık, geçmiş üretimler |
+| 101–145 | **ANA ARAYÜZ** | Video upload, analiz notları, üretim notları, süre slider, ton seçimi, ÜRET butonu |
+| 146–235 | **ADIM 1-2: ANALİZ + METİN** | Video analiz → Metin üretimi (JSON schema) |
+| 236–270 | **ADIM 3: THREADS** | Threads metni üretimi (fallback ile) |
+| 271–313 | **ADIM 4: SES + KAYIT** | TTS → WAV dosyası, kayitlar.json'a ekleme |
+| 314–418 | **SONUÇLAR UI** | Medya oynatma, metin gösterimi, Telegram gönderimi, yeniden ses üretimi, CoT expander |
 
-#### `SmartRouter` Sınıfı Detayı:
+#### Session State Anahtarları:
+
+| Key | Tip | Açıklama |
+|-----|-----|----------|
+| `sonuc` | dict/None | Son üretim sonucu |
+| `log_satirlari` | list[str] | Canlı log |
+| `gecici_ses_dosyalari` | list[str] | Temp WAV yolları |
+
+#### Sidebar Ses Seçenekleri (11 ses):
+
+| Ses | Karakter |
+|-----|----------|
+| Autonoe | Parlak - Kadın |
+| Puck | Enerjik - Erkek |
+| Aoede | Yumuşak - Kadın |
+| Callirrhoe | Doğal - Kadın |
+| Kore | Net - Kadın |
+| Leda | Dinamik - Kadın |
+| Zephyr | Parlak - Kadın |
+| Charon | Bilgi - Erkek |
+| Orus | Sert - Erkek |
+| Iapetus | Akıcı - Erkek |
+| Umbriel | Rahat - Erkek |
+
+#### Ton Seçenekleri:
+
+| Ton | Bilgi/Eğlence Oranı |
+|-----|---------------------|
+| 🎭 Eğlence Ağırlıklı | 1/4 bilgi, 3/4 eğlence |
+| ⚖️ Dengeli (varsayılan) | 1/2 bilgi, 1/2 eğlence |
+| 🧠 Bilgi Ağırlıklı | 3/4 bilgi, 1/4 eğlence |
+| 📊 Teknik Odaklı | 9/10 bilgi, 1/10 eğlence |
+
+---
+
+### 3.2 — `router.py` (SmartRouter)
+
+**Boyut:** ~199 satır  
+**Sorumluluk:** API key rotasyonu, ban yönetimi, model fallback, hata handling
+
+#### SmartRouter Sınıfı Detayı:
 
 ```
 SmartRouter
@@ -93,86 +135,89 @@ SmartRouter
 | 404 / Not found | 24 saat | Model bazlı (tüm key'ler) |
 | Diğer | 5 dk | Key+Model combo |
 
-#### Üretim Pipeline (4 Adım):
+---
 
-```
-┌─────────────────────────────────────────────────────────┐
-│ ADIM 1: VIDEO ANALİZ                                    │
-│  Girdi: video bytes + analiz notları + süre             │
-│  Model: VIDEO_ANALIZ_MODELLERI + Google Search          │
-│  Çıktı: analiz_metni (marka, görsel akış, viral veri)  │
-├─────────────────────────────────────────────────────────┤
-│ ADIM 2: METİN ÜRETİMİ                                   │
-│  Girdi: analiz + üretim notları                         │
-│  System: kurallar.txt + sistem_talimati.txt             │
-│  Schema: beyin_firtinasi, veri_kilitleme, oz_elestiri,  │
-│          seslendirme_metni, reels_aciklamasi,           │
-│          reels_hashtagleri, kapak_basliklari            │
-│  Model: METIN_MODELLERI (arama KAPALI)                  │
-│  Çıktı: JSON veri                                       │
-├─────────────────────────────────────────────────────────┤
-│ ADIM 3: THREADS ÜRETİMİ                                 │
-│  Girdi: reels_aciklamasi                                │
-│  System: threads_promptu.txt                            │
-│  Schema: threads_aciklamasi (STRING)                    │
-│  Model: METIN_MODELLERI (arama KAPALI)                  │
-│  Fallback: reels_aciklamasi[:500]                       │
-│  Çıktı: threads_aciklamasi                              │
-├─────────────────────────────────────────────────────────┤
-│ ADIM 4: SES ÜRETİMİ (TTS)                               │
-│  Girdi: seslendirme_metni + seçilen ses                 │
-│  Model: gemini-2.5-flash-preview-tts                    │
-│  Format: WAV (mono, 16-bit, 24kHz)                      │
-│  Çıktı: .wav dosyası (temp)                             │
-└─────────────────────────────────────────────────────────┘
-```
+### 3.3 — `prompts.py` (Prompt Yönetimi)
 
-#### JSON Response Schema (Metin Üretimi):
+**Boyut:** ~52 satır  
+**Sorumluluk:** `.txt` dosyalarını okuma, placeholder'ları doldurma
 
-```json
-{
-  "type": "OBJECT",
-  "properties": {
-    "beyin_firtinasi":    "STRING  → Strateji planı (CoT adım 1)",
-    "veri_kilitleme":     "STRING  → Kesin rakamlar listesi (CoT adım 2)",
-    "oz_elestiri":        "STRING  → Öz denetim (CoT adım 3)",
-    "seslendirme_metni":  "STRING  → TTS metni (hedef kelime ±%10)",
-    "reels_aciklamasi":   "STRING  → 5 katmanlı caption (hashtagsiz)",
-    "reels_hashtagleri":  "ARRAY<STRING> → Tam 5 hashtag",
-    "kapak_basliklari":   "ARRAY<{ana: STRING, alt: STRING}> → 5 alternatif"
-  },
-  "required": ["tüm alanlar"]
-}
-```
+#### Fonksiyonlar:
 
-#### Session State Anahtarları:
-
-| Key | Tip | Açıklama |
-|-----|-----|----------|
-| `sonuc` | dict/None | Son üretim sonucu |
-| `log_satirlari` | list[str] | Canlı log |
-| `gecici_ses_dosyalari` | list[str] | Temp WAV yolları |
-| `blacklist` | dict | Ban kayıtları {key: timestamp} |
-
-#### Sidebar Ses Seçenekleri (11 ses):
-
-| Ses | Karakter |
-|-----|----------|
-| Autonoe | Parlak - Kadın |
-| Puck | Enerjik - Erkek |
-| Aoede | Yumuşak - Kadın |
-| Callirrhoe | Doğal - Kadın |
-| Kore | Net - Kadın |
-| Leda | Dinamik - Kadın |
-| Zephyr | Parlak - Kadın |
-| Charon | Bilgi - Erkek |
-| Orus | Sert - Erkek |
-| Iapetus | Akıcı - Erkek |
-| Umbriel | Rahat - Erkek |
+| Fonksiyon | Açıklama |
+|-----------|----------|
+| `prompt_dosyasi_oku(dosya_adi)` | Belirtilen .txt dosyasını okur |
+| `guncellik_talimatini_hazirla()` | `guncellik_talimati.txt` → `{bugunun_tarihi}` placeholder'ını doldurur |
+| `sistem_talimatini_hazirla(sure, kelime, oran)` | 6 placeholder'ı doldurur: `{guncellik_talimati}`, `{sure_saniye}`, `{kelime_sayisi}`, `{min_kelime}`, `{max_kelime}`, `{bilgi_orani}` |
+| `video_analiz_promptunu_hazirla(notlar, sure)` | 3 placeholder'ı doldurur: `{ek_notlar_bolumu}`, `{guncellik_talimati}`, `{sure_saniye}` |
 
 ---
 
-### 3.2 — `kurallar.txt` (STATİK PROMPT)
+### 3.4 — `storage.py` (Kayıt Yönetimi)
+
+**Boyut:** ~47 satır  
+**Sorumluluk:** `kayitlar.json` CRUD işlemleri
+
+#### Fonksiyonlar:
+
+| Fonksiyon | Açıklama |
+|-----------|----------|
+| `kayitlari_yukle()` | JSON dosyasını okur, liste döner |
+| `kayitlari_kaydet(kayitlar)` | Listeyi JSON'a yazar |
+| `eski_sesleri_temizle(kayitlar)` | 24 saatten eski ses dosyalarını siler |
+| `kayit_ekle(veri)` | Yeni kayıt ekler, max 5 kayıt tutar, eski sesleri temizler |
+
+---
+
+### 3.5 — `config.py` (Yapılandırma)
+
+**Boyut:** ~60 satır  
+**Sorumluluk:** Sabitler, API key'leri, model listeleri, tarih yardımcıları
+
+#### Yapılandırma Öğeleri:
+
+| Kategori | Öğeler |
+|----------|--------|
+| **API Keys** | `GEMINI_KEYS` (dict), `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
+| **Cooldowns** | `COOLDOWN_QUOTA=60`, `COOLDOWN_UNAVAILABLE=900`, `COOLDOWN_GENERIC=300`, `COOLDOWN_NOT_FOUND=86400`, `COOLDOWN_FREE_TIER_YOK=604800` |
+| **Modeller** | `VIDEO_ANALIZ_MODELLERI`, `METIN_MODELLERI`, `SES_MODELI` |
+| **Kayıt** | `KAYIT_DOSYASI="kayitlar.json"`, `MAX_KAYIT=5`, `SES_DOSYA_OMRU_SAAT=24` |
+| **Tarih** | `AYLAR_TR`, `GUNLER_TR`, `guncel_tarih_metni()` |
+
+---
+
+### 3.6 — `utils.py` (Yardımcı Fonksiyonlar)
+
+**Boyut:** ~50 satır  
+**Sorumluluk:** Saf fonksiyonlar (stateless)
+
+#### Fonksiyonlar:
+
+| Fonksiyon | Açıklama |
+|-----------|----------|
+| `markdown_temizle(metin)` | Markdown code block'ları temizler |
+| `json_parse(metin)` | JSON string'i parse eder, fallback ile |
+| `gecici_dosya_olustur(veri, uzanti)` | Temp dizinine UUID'li dosya yazar |
+| `sekmeyi_aktif_tut()` | Streamlit sekmesini aktif tutmak için JS inject eder |
+
+---
+
+### 3.7 — `telegram.py` (Telegram Bot API)
+
+**Boyut:** ~110 satır  
+**Sorumluluk:** Telegram'a metin ve ses gönderimi
+
+#### Fonksiyonlar:
+
+| Fonksiyon | Açıklama |
+|-----------|----------|
+| `telegram_mesaj_gonder(bot_token, chat_id, metin)` | Text mesaj gönderir |
+| `telegram_ses_gonder(bot_token, chat_id, dosya_yolu, baslik)` | WAV dosyası gönderir |
+| `telegram_toplu_gonder(bot_token, chat_id, veri, ses_dosyasi, log_ekle)` | Tüm çıktıları sırayla gönderir (ses metni, reels açıklaması, kapak başlıkları, threads, ses dosyası) |
+
+---
+
+### 3.8 — `kurallar.txt` (STATİK PROMPT)
 
 **Rol:** Ana içerik üretim kural seti (system prompt'un ilk parçası)  
 **Boyut:** ~250 satır  
@@ -194,7 +239,7 @@ SmartRouter
 
 ---
 
-### 3.3 — `sistem_talimati.txt` (DİNAMİK ŞABLON)
+### 3.9 — `sistem_talimati.txt` (DİNAMİK ŞABLON)
 
 **Rol:** System prompt'un ikinci parçası (kurallar.txt'den sonra eklenir)  
 **Dinamik mi?:** EVET — 6 placeholder var
@@ -220,18 +265,9 @@ SmartRouter
 | 4 | Zorunlu düşünce zinciri (CoT) — beyin_firtinasi, veri_kilitleme, oz_elestiri |
 | 5 | Çıktı formatı (JSON şema uyumu) |
 
-#### Bilgi-Eğlence Oranları:
-
-| Ton Seçimi | Oran |
-|------------|------|
-| 🎭 Eğlence Ağırlıklı | 1/4 bilgi, 3/4 eğlence |
-| ⚖️ Dengeli (varsayılan) | 1/2 bilgi, 1/2 eğlence |
-| 🧠 Bilgi Ağırlıklı | 3/4 bilgi, 1/4 eğlence |
-| 📊 Teknik Odaklı | 9/10 bilgi, 1/10 eğlence |
-
 ---
 
-### 3.4 — `guncellik_talimati.txt` (DİNAMİK ŞABLON)
+### 3.10 — `guncellik_talimati.txt` (DİNAMİK ŞABLON)
 
 **Rol:** Güncel veri doğrulama kuralları  
 **Dinamik mi?:** EVET — 1 placeholder
@@ -250,7 +286,7 @@ SmartRouter
 
 ---
 
-### 3.5 — `video_analiz_promptu.txt` (DİNAMİK ŞABLON)
+### 3.11 — `video_analiz_promptu.txt` (DİNAMİK ŞABLON)
 
 **Rol:** Video analiz aşamasının promptu  
 **Dinamik mi?:** EVET — 3 placeholder
@@ -283,7 +319,7 @@ SmartRouter
 
 ---
 
-### 3.6 — `threads_promptu.txt` (STATİK PROMPT)
+### 3.12 — `threads_promptu.txt` (STATİK PROMPT)
 
 **Rol:** Threads/X paylaşım metni üretimi  
 **Dinamik mi?:** HAYIR  
@@ -299,18 +335,19 @@ SmartRouter
 
 ---
 
-### 3.7 — `requirements.txt`
+### 3.13 — `requirements.txt`
 
 ```
 streamlit
 google-genai
+requests
 ```
 
-Sadece 2 bağımlılık. Tüm diğer modüller (json, os, re, wave, tempfile, uuid, base64) Python stdlib.
+3 bağımlılık. Tüm diğer modüller (json, os, re, wave, tempfile, uuid, base64) Python stdlib.
 
 ---
 
-### 3.8 — `.devcontainer/devcontainer.json`
+### 3.14 — `.devcontainer/devcontainer.json`
 
 | Alan | Değer |
 |------|-------|
@@ -321,7 +358,7 @@ Sadece 2 bağımlılık. Tüm diğer modüller (json, os, re, wave, tempfile, uu
 
 ---
 
-### 3.9 — `README.md`
+### 3.15 — `README.md`
 
 Sadece başlık: `# RLR-ASİST`
 
@@ -378,6 +415,7 @@ KULLANICI GİRDİLERİ
 │  ├── UI gösterim (ses, metinler, CoT)           │
 │  ├── kayitlar.json (son 5 üretim)               │
 │  └── Yeniden ses üretimi (düzenlenebilir)       │
+│  └── Telegram toplu gönderim (opsiyonel)        │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -391,6 +429,9 @@ KULLANICI GİRDİLERİ
 [GEMINI_KEYS]
 "mail1@gmail.com" = "AIza..."
 "mail2@gmail.com" = "AIza..."
+
+TELEGRAM_BOT_TOKEN = "bot_token_here"
+TELEGRAM_CHAT_ID = "chat_id_here"
 ```
 
 Birden fazla API key destekleniyor. SmartRouter hepsini sırayla deniyor.
@@ -411,7 +452,7 @@ veya GitHub Codespaces'te otomatik (devcontainer).
 
 | # | Gözlem |
 |---|--------|
-| 1 | **Monolitik yapı** — Tüm iş mantığı tek `app.py`'de (~550 satır) |
+| 1 | **Modüler yapı** — İş mantığı 6 Python dosyasına bölünmüş (app, router, prompts, storage, config, utils, telegram) |
 | 2 | **Prompt'lar dosyalarda** — Değişiklik kolay, kod dokunmadan ayarlanabilir |
 | 3 | **SmartRouter** — Multi-key × multi-model fallback + akıllı ban sistemi |
 | 4 | **Chain of Thought** — JSON schema içine düşünme adımları gömülü (beyin_firtinasi, veri_kilitleme, oz_elestiri) |
@@ -419,7 +460,43 @@ veya GitHub Codespaces'te otomatik (devcontainer).
 | 6 | **Kalıcı depolama yok** — Sadece `kayitlar.json` (max 5 kayıt), veritabanı yok |
 | 7 | **Ses dosyaları geçici** — temp dizinde, 24 saat sonra otomatik silinir |
 | 8 | **Tek kullanıcı** — Auth yok, secrets ile API key yönetimi |
+| 9 | **Telegram entegrasyonu** — Tüm çıktılar tek tıkla Telegram'a gönderilebilir |
+| 10 | **Kelime hesaplama** — Formül: `round(sure × 2.8 / 5) × 5` (±%10 tolerans) |
 
 ---
 
-İşte dostum, projenin tamamı bu. Şimdi ne değişiklik yapmak istersin? Aklındaki planı söyle, birlikte yapalım. 🚀
+## 📋 8. JSON RESPONSE SCHEMAS
+
+### Metin Üretimi Schema:
+
+```json
+{
+  "type": "OBJECT",
+  "properties": {
+    "beyin_firtinasi":    "STRING  → Strateji planı (CoT adım 1)",
+    "veri_kilitleme":     "STRING  → Kesin rakamlar listesi (CoT adım 2)",
+    "oz_elestiri":        "STRING  → Öz denetim (CoT adım 3)",
+    "seslendirme_metni":  "STRING  → TTS metni (hedef kelime ±%10)",
+    "reels_aciklamasi":   "STRING  → 5 katmanlı caption (hashtagsiz)",
+    "reels_hashtagleri":  "ARRAY<STRING> → Tam 5 hashtag",
+    "kapak_basliklari":   "ARRAY<{ana: STRING, alt: STRING}> → 5 alternatif"
+  },
+  "required": ["tüm alanlar"]
+}
+```
+
+### Threads Schema:
+
+```json
+{
+  "type": "OBJECT",
+  "properties": {
+    "threads_aciklamasi": "STRING → Max 500 karakter, hashtag yok"
+  },
+  "required": ["threads_aciklamasi"]
+}
+```
+
+---
+
+İşte dostum, projenin en güncel şeması bu! 🚀
