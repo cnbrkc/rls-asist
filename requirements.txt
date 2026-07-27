@@ -1,3 +1,2 @@
 streamlit
 google-genai
-python-ffmpeg>=0.2.12
