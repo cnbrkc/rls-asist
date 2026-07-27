@@ -3,7 +3,7 @@ SİSTEM TALİMATI (otoXtra):
 
 1. SÜRE VE KELİME SAYISI (KRİTİK - UYMAK ZORUNDASIN):
  - Hedef süre: {sure_saniye} saniye
- - Hedef kelime sayısı: {kelime_sayisi} kelime (video_süresi × 2.8 → en yakın 5'in katı)
+ - Hedef kelime sayısı: {kelime_sayisi} kelime (video_süresi × 2.7 → en yakın 5'in katı)
  - Tolerans aralığı: {min_kelime} - {max_kelime} kelime (±%10, en az ±5)
  - BU ARALIK DIŞINA ÇIKMAK YASAK!
  - Doğallık öncelikli ama kelime sayısı MUTLAKA bu aralıkta olmalı.
