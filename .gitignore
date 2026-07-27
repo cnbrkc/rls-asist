@@ -1,0 +1,4 @@
+.streamlit/secrets.toml
+kayitlar.json
+__pycache__/
+*.pyc
