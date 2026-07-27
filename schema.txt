@@ -1,0 +1,425 @@
+# 📐 RLS-ASİST (otoXtra) — PROJE ŞEMASI v1.0
+
+## 🗂️ 1. GENEL BAKIŞ
+
+| Alan | Detay |
+|------|-------|
+| **Proje Adı** | otoXtra (RLR-ASİST) |
+| **Amaç** | Otomobil temalı Instagram Reels + Threads içeriği otomatik üretimi |
+| **Teknoloji** | Python + Streamlit + Google Gemini AI |
+| **Çalışma Ortamı** | GitHub Codespaces / Dev Container |
+| **Dil** | Python 3.11 |
+| **Toplam Dosya** | 9 dosya + 1 klasör |
+
+---
+
+## 📁 2. DOSYA AĞACI
+
+```
+rls-asist/
+├── .devcontainer/
+│   └── devcontainer.json        → Codespaces yapılandırması
+├── app.py                       → ANA UYGULAMA (tek dosya, ~550 satır)
+├── kurallar.txt                 → Reels içerik üretim kuralları (prompt)
+├── sistem_talimati.txt          → Sistem talimatı şablonu (dinamik)
+├── guncellik_talimati.txt       → Güncellik/doğruluk kuralları (dinamik)
+├── video_analiz_promptu.txt     → Video analiz promptu (dinamik)
+├── threads_promptu.txt          → Threads üretim promptu (statik)
+├── requirements.txt             → Python bağımlılıkları
+├── README.md                    → Proje başlığı (minimal)
+└── kayitlar.json                → [RUNTIME] Üretim geçmişi (otomatik oluşur)
+```
+
+---
+
+## 📄 3. DOSYA DETAYLARI
+
+---
+
+### 3.1 — `app.py` (ANA UYGULAMA)
+
+**Boyut:** ~550 satır, tek dosya monolitik yapı  
+**Framework:** Streamlit  
+**Sorumluluk:** Tüm iş mantığı + UI + API yönetimi
+
+#### Bölüm Haritası (Sırayla):
+
+| Satır Aralığı | Bölüm | Açıklama |
+|---|---|---|
+| 1–15 | **Import'lar** | streamlit, google.genai, json, os, re, time, wave, tempfile, uuid, base64, datetime |
+| 17–70 | **KAYIT DOSYASI YARDIMCILARI** | `kayitlar.json` CRUD işlemleri (max 5 kayıt, 24 saat ses ömrü) |
+| 72–115 | **PROMPT YÜKLEME YARDIMCILARI** | `.txt` prompt dosyalarını oku + dinamik şablon doldurma |
+| 117–125 | **API KEY YAPILANDIRMASI** | `st.secrets["GEMINI_KEYS"]` → dict (mail: key) |
+| 127–165 | **AYARLAR VE SABİTLER** | Cooldown süreleri, model listeleri, Türkçe aylar |
+| 167–230 | **YARDIMCI FONKSİYONLAR** | markdown temizleme, JSON parse, temp dosya yönetimi, sekme aktif tutma |
+| 232–370 | **SmartRouter SINIFI** | Akıllı API yönlendirme, ban sistemi, hata yönetimi |
+| 372–400 | **SAYFA AYARLARI + UI INIT** | page_config, session_state başlatma |
+| 402–460 | **SOL MENÜ (Sidebar)** | Ses seçimi, key listesi, ban durumu, geçmiş üretimler |
+| 462–500 | **ANA ARAYÜZ** | Video upload, analiz notları, süre, ton seçimi, ÜRET butonu |
+| 502–600 | **ÜRETİM PIPELINE** | 4 adımlı üretim akışı (analiz → metin → threads → ses) |
+| 602–700 | **SONUÇLAR UI** | Medya oynatma, metin gösterimi, düşünce zinciri, yeniden ses üretimi |
+
+#### `SmartRouter` Sınıfı Detayı:
+
+```
+SmartRouter
+├── __init__()              → blacklist dict başlatma (session_state)
+├── _is_banned()            → mail+model kombinasyonu banlı mı?
+├── _ban()                  → Ban ekle (scope: model/key/combo)
+├── _retry_delay_cikar()    → Hata mesajından retryDelay parse et
+├── _parse_hata()           → Hata tipini belirle (quota/404/503/free_tier)
+├── _handle_hata()          → Hata aksiyonu (break_model / devam)
+├── _make_request()         → Model×Key matrisinde döngü, ilk başarılıyı döndür
+├── metin_uret()            → JSON schema ile structured output + opsiyonel Google Search
+├── ses_uret()              → TTS (text-to-speech) → WAV dosyası
+└── video_analiz_et()       → Video bytes + prompt → analiz metni
+```
+
+#### Model Stratejisi:
+
+| Görev | Modeller | Öncelik |
+|-------|----------|---------|
+| Video Analiz | `gemini-3.6-flash` → `gemini-2.5-flash` | En zeki modeller |
+| Metin Üretimi | `gemini-3.6-flash` → `gemini-2.5-flash` → `gemini-3.5-flash-lite` → `gemini-3.1-flash-lite` | Zeki + yüksek kota yedekler |
+| Ses (TTS) | `gemini-2.5-flash-preview-tts` | Tek model |
+
+#### Cooldown/Ban Sistemi:
+
+| Hata Tipi | Cooldown | Scope |
+|-----------|----------|-------|
+| Free tier yok (limit: 0) | 7 gün | Model bazlı (tüm key'ler) |
+| 429 / Quota | retryDelay veya 60sn | Key+Model combo |
+| 503 / Unavailable | 15 dk | Key+Model combo |
+| 404 / Not found | 24 saat | Model bazlı (tüm key'ler) |
+| Diğer | 5 dk | Key+Model combo |
+
+#### Üretim Pipeline (4 Adım):
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ ADIM 1: VIDEO ANALİZ                                    │
+│  Girdi: video bytes + analiz notları + süre             │
+│  Model: VIDEO_ANALIZ_MODELLERI + Google Search          │
+│  Çıktı: analiz_metni (marka, görsel akış, viral veri)  │
+├─────────────────────────────────────────────────────────┤
+│ ADIM 2: METİN ÜRETİMİ                                   │
+│  Girdi: analiz + üretim notları                         │
+│  System: kurallar.txt + sistem_talimati.txt             │
+│  Schema: beyin_firtinasi, veri_kilitleme, oz_elestiri,  │
+│          seslendirme_metni, reels_aciklamasi,           │
+│          reels_hashtagleri, kapak_basliklari            │
+│  Model: METIN_MODELLERI (arama KAPALI)                  │
+│  Çıktı: JSON veri                                       │
+├─────────────────────────────────────────────────────────┤
+│ ADIM 3: THREADS ÜRETİMİ                                 │
+│  Girdi: reels_aciklamasi                                │
+│  System: threads_promptu.txt                            │
+│  Schema: threads_aciklamasi (STRING)                    │
+│  Model: METIN_MODELLERI (arama KAPALI)                  │
+│  Fallback: reels_aciklamasi[:500]                       │
+│  Çıktı: threads_aciklamasi                              │
+├─────────────────────────────────────────────────────────┤
+│ ADIM 4: SES ÜRETİMİ (TTS)                               │
+│  Girdi: seslendirme_metni + seçilen ses                 │
+│  Model: gemini-2.5-flash-preview-tts                    │
+│  Format: WAV (mono, 16-bit, 24kHz)                      │
+│  Çıktı: .wav dosyası (temp)                             │
+└─────────────────────────────────────────────────────────┘
+```
+
+#### JSON Response Schema (Metin Üretimi):
+
+```json
+{
+  "type": "OBJECT",
+  "properties": {
+    "beyin_firtinasi":    "STRING  → Strateji planı (CoT adım 1)",
+    "veri_kilitleme":     "STRING  → Kesin rakamlar listesi (CoT adım 2)",
+    "oz_elestiri":        "STRING  → Öz denetim (CoT adım 3)",
+    "seslendirme_metni":  "STRING  → TTS metni (hedef kelime ±%10)",
+    "reels_aciklamasi":   "STRING  → 5 katmanlı caption (hashtagsiz)",
+    "reels_hashtagleri":  "ARRAY<STRING> → Tam 5 hashtag",
+    "kapak_basliklari":   "ARRAY<{ana: STRING, alt: STRING}> → 5 alternatif"
+  },
+  "required": ["tüm alanlar"]
+}
+```
+
+#### Session State Anahtarları:
+
+| Key | Tip | Açıklama |
+|-----|-----|----------|
+| `sonuc` | dict/None | Son üretim sonucu |
+| `log_satirlari` | list[str] | Canlı log |
+| `gecici_ses_dosyalari` | list[str] | Temp WAV yolları |
+| `blacklist` | dict | Ban kayıtları {key: timestamp} |
+
+#### Sidebar Ses Seçenekleri (11 ses):
+
+| Ses | Karakter |
+|-----|----------|
+| Autonoe | Parlak - Kadın |
+| Puck | Enerjik - Erkek |
+| Aoede | Yumuşak - Kadın |
+| Callirrhoe | Doğal - Kadın |
+| Kore | Net - Kadın |
+| Leda | Dinamik - Kadın |
+| Zephyr | Parlak - Kadın |
+| Charon | Bilgi - Erkek |
+| Orus | Sert - Erkek |
+| Iapetus | Akıcı - Erkek |
+| Umbriel | Rahat - Erkek |
+
+---
+
+### 3.2 — `kurallar.txt` (STATİK PROMPT)
+
+**Rol:** Ana içerik üretim kural seti (system prompt'un ilk parçası)  
+**Boyut:** ~250 satır  
+**Dinamik mi?:** HAYIR (sabit metin)
+
+#### İçerik Bölümleri:
+
+| Bölüm | Konu |
+|-------|------|
+| §1 KİMLİK | otoXtra persona, hedef kitle, ton (samimi halk ağzı) |
+| §2 GİRDİ VE HESAPLAMA | Kelime formülü: süre × 2.8 → en yakın 5'in katı, ±%10 tolerans |
+| §3 ÇIKTI FORMATI | 4 bölüm sırası: Seslendirme → Açıklama → Hashtag → Kapak |
+| §4 SESLENDİRME KURALLARI | Doğal akış, cümle yapısı, bilgi yoğunluğu, duygu/ton, pozisyon alma, TTS format, paylaşılabilirlik, yasaklar |
+| §5 CAPTION KURALLARI | 5 katman (Hook → Bağlam → İlişkilendirme → Hot Take → CTA), SEO, biçim |
+| §6 HASHTAG KURALLARI | Tam 5 etiket, dağılım (marka/geniş/niş/özel), yasaklı etiketler |
+| §7 ENGAGEMENT BAIT YASAĞI | Kırmızı/Gri/Yeşil liste |
+| §8 KAPAK BAŞLIK KURALLARI | Ana (2-4 kelime BÜYÜK) + Alt (5-10 kelime), 5 alternatif |
+| §9 GENEL İLKELER | Niş sınırı, içerik tipleri |
+
+---
+
+### 3.3 — `sistem_talimati.txt` (DİNAMİK ŞABLON)
+
+**Rol:** System prompt'un ikinci parçası (kurallar.txt'den sonra eklenir)  
+**Dinamik mi?:** EVET — 6 placeholder var
+
+#### Placeholder'lar:
+
+| Placeholder | Kaynak | Örnek Değer |
+|-------------|--------|-------------|
+| `{guncellik_talimati}` | `guncellik_talimati.txt` işlenmiş hali | "Bugün: 27 Temmuz 2026..." |
+| `{sure_saniye}` | Kullanıcı input | `30` |
+| `{kelime_sayisi}` | Hesaplama: round(30×2.8/5)×5 | `85` |
+| `{min_kelime}` | max(5, int(85×0.9)) | `76` |
+| `{max_kelime}` | int(85×1.1) | `93` |
+| `{bilgi_orani}` | Ton seçimine göre | "Her 2 cümleden 1'i..." |
+
+#### İçerik Bölümleri:
+
+| § | Konu |
+|---|------|
+| 1 | Süre ve kelime sayısı (KRİTİK) |
+| 2 | Bilgi-eğlence oranı (tona göre) |
+| 3 | Kullanıcı notları önceliği |
+| 4 | Zorunlu düşünce zinciri (CoT) — beyin_firtinasi, veri_kilitleme, oz_elestiri |
+| 5 | Çıktı formatı (JSON şema uyumu) |
+
+#### Bilgi-Eğlence Oranları:
+
+| Ton Seçimi | Oran |
+|------------|------|
+| 🎭 Eğlence Ağırlıklı | 1/4 bilgi, 3/4 eğlence |
+| ⚖️ Dengeli (varsayılan) | 1/2 bilgi, 1/2 eğlence |
+| 🧠 Bilgi Ağırlıklı | 3/4 bilgi, 1/4 eğlence |
+| 📊 Teknik Odaklı | 9/10 bilgi, 1/10 eğlence |
+
+---
+
+### 3.4 — `guncellik_talimati.txt` (DİNAMİK ŞABLON)
+
+**Rol:** Güncel veri doğrulama kuralları  
+**Dinamik mi?:** EVET — 1 placeholder
+
+#### Placeholder:
+
+| Placeholder | Kaynak |
+|-------------|--------|
+| `{bugunun_tarihi}` | `guncel_tarih_metni()` → "27 Temmuz 2026" |
+
+#### İçerik:
+- Google Search ile güncel veri doğrulama zorunluluğu
+- Model adı kesinliği (benzer model tuzağı)
+- Türkiye pazarı kontrolü (satış var mı?)
+- Rakam uydurma yasağı
+
+---
+
+### 3.5 — `video_analiz_promptu.txt` (DİNAMİK ŞABLON)
+
+**Rol:** Video analiz aşamasının promptu  
+**Dinamik mi?:** EVET — 3 placeholder
+
+#### Placeholder'lar:
+
+| Placeholder | Kaynak |
+|-------------|--------|
+| `{ek_notlar_bolumu}` | Kullanıcının analiz notları (varsa) |
+| `{guncellik_talimati}` | İşlenmiş güncellik talimatı |
+| `{sure_saniye}` | Hedef süre |
+
+#### İçerik (7 Çıktı Bölümü):
+
+| # | Bölüm | Amaç |
+|---|-------|------|
+| 1 | Görsel Akış Haritası | Açılış/Orta/Kapanış görselleri |
+| 2 | Viral Detaylar + Türk İzleyici Kancası | Google Search verileri |
+| 3 | Tespit Edilen Teknik Veriler | Marka/model/rakamlar |
+| 4 | Kurgu & Hızlandırma Stratejisi | En vurucu anlar |
+| 5 | Hook Önerisi | İlk 3 saniye kancası |
+| 6 | Kanıştırıcı Kapanış | Son 3 saniye CTA |
+| 7 | Duygu Akışı | Görsel-duygu eşlemesi |
+
+#### Kritik Kurallar:
+- Marka/model tespiti hiyerarşisi: Kullanıcı > Görsel tespit > "araç"
+- Benzer model tuzağı (KIRMIZI ÇİZGİ)
+- Türkiye satış kontrolü
+- Halüsinasyon yasağı
+
+---
+
+### 3.6 — `threads_promptu.txt` (STATİK PROMPT)
+
+**Rol:** Threads/X paylaşım metni üretimi  
+**Dinamik mi?:** HAYIR  
+**Boyut:** ~8 satır (çok kısa)
+
+#### Kurallar:
+- Sadece JSON üret
+- Max 500 karakter
+- Hashtag YASAK
+- Ton: Ukala ama haklı, "hot take"
+- İlk cümle: kesin yargı
+- Bitiş: iddialı cümle (soru değil)
+
+---
+
+### 3.7 — `requirements.txt`
+
+```
+streamlit
+google-genai
+```
+
+Sadece 2 bağımlılık. Tüm diğer modüller (json, os, re, wave, tempfile, uuid, base64) Python stdlib.
+
+---
+
+### 3.8 — `.devcontainer/devcontainer.json`
+
+| Alan | Değer |
+|------|-------|
+| Image | `mcr.microsoft.com/devcontainers/python:1-3.11-bookworm` |
+| Açılacak dosyalar | README.md, app.py |
+| VS Code eklentileri | ms-python.python, ms-python.vscode-pylance |
+| Post-create | `pip install -r requirements.txt` |
+
+---
+
+### 3.9 — `README.md`
+
+Sadece başlık: `# RLR-ASİST`
+
+---
+
+## 🔄 4. VERİ AKIŞ DİYAGRAMI
+
+```
+KULLANICI GİRDİLERİ
+├── Video dosyası (opsiyonel, max 20MB)
+├── Analiz Notları (text)
+├── Üretim Notları (text)
+├── Hedef Süre (5-180 sn)
+├── İçerik Tonu (4 seçenek)
+└── Ses Seçimi (11 seçenek)
+         │
+         ▼
+┌─────────────────────┐
+│  PROMPT BİRLEŞTİRME │
+│  kurallar.txt       │──→ system_prompt (ADIM 2)
+│  + sistem_talimati  │
+│  + guncellik        │
+└─────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────┐
+│  ADIM 1: VIDEO ANALİZ (gemini-3.6/2.5-flash)   │
+│  + Google Search aktif                          │
+│  → analiz_metni                                 │
+└─────────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────┐
+│  ADIM 2: METİN ÜRETİMİ (structured JSON)        │
+│  + Google Search KAPALI                         │
+│  → 7 alanlı JSON (CoT + içerik)                 │
+└─────────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────┐
+│  ADIM 3: THREADS (ayrı model çağrısı)           │
+│  → threads_aciklamasi (max 500 char)            │
+└─────────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────┐
+│  ADIM 4: TTS (gemini-2.5-flash-preview-tts)    │
+│  → WAV dosyası (mono/16bit/24kHz)              │
+└─────────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────┐
+│  ÇIKTI & KAYIT                                  │
+│  ├── UI gösterim (ses, metinler, CoT)           │
+│  ├── kayitlar.json (son 5 üretim)               │
+│  └── Yeniden ses üretimi (düzenlenebilir)       │
+└─────────────────────────────────────────────────┘
+```
+
+---
+
+## 🔐 5. GİZLİ YAPILANDIRMA
+
+`st.secrets["GEMINI_KEYS"]` → Streamlit secrets (`.streamlit/secrets.toml`)
+
+```toml
+[GEMINI_KEYS]
+"mail1@gmail.com" = "AIza..."
+"mail2@gmail.com" = "AIza..."
+```
+
+Birden fazla API key destekleniyor. SmartRouter hepsini sırayla deniyor.
+
+---
+
+## ⚙️ 6. ÇALIŞTIRMA
+
+```bash
+streamlit run app.py
+```
+
+veya GitHub Codespaces'te otomatik (devcontainer).
+
+---
+
+## 📊 7. MİMARİ NOTLAR / GÖZLEMLER
+
+| # | Gözlem |
+|---|--------|
+| 1 | **Monolitik yapı** — Tüm iş mantığı tek `app.py`'de (~550 satır) |
+| 2 | **Prompt'lar dosyalarda** — Değişiklik kolay, kod dokunmadan ayarlanabilir |
+| 3 | **SmartRouter** — Multi-key × multi-model fallback + akıllı ban sistemi |
+| 4 | **Chain of Thought** — JSON schema içine düşünme adımları gömülü (beyin_firtinasi, veri_kilitleme, oz_elestiri) |
+| 5 | **Google Search** — Sadece video analiz adımında aktif, metin üretiminde kapalı |
+| 6 | **Kalıcı depolama yok** — Sadece `kayitlar.json` (max 5 kayıt), veritabanı yok |
+| 7 | **Ses dosyaları geçici** — temp dizinde, 24 saat sonra otomatik silinir |
+| 8 | **Tek kullanıcı** — Auth yok, secrets ile API key yönetimi |
+
+---
+
+İşte dostum, projenin tamamı bu. Şimdi ne değişiklik yapmak istersin? Aklındaki planı söyle, birlikte yapalım. 🚀
