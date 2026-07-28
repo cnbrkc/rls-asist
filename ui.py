@@ -47,6 +47,16 @@ if "log_satirlari" not in st.session_state:
 if "gecici_ses_dosyalari" not in st.session_state:
     st.session_state.gecici_ses_dosyalari = []
 
+# Widget'lar için session state başlangıç değerleri
+if "sure_saniye" not in st.session_state:
+    st.session_state.sure_saniye = 30
+if "video_analiz_notlari" not in st.session_state:
+    st.session_state.video_analiz_notlari = ""
+if "metin_uretim_notlari" not in st.session_state:
+    st.session_state.metin_uretim_notlari = ""
+if "icerik_tonu" not in st.session_state:
+    st.session_state.icerik_tonu = "⚖️ Dengeli (%50 bilgi)"
+
 router = SmartRouter()
 eski_ses_dosyalarini_temizle()
 
@@ -65,7 +75,8 @@ with st.sidebar:
             "Orus (Sert - Erkek)", "Iapetus (Akıcı - Erkek)",
             "Umbriel (Rahat - Erkek)"
         ],
-        label_visibility="collapsed"
+        label_visibility="collapsed",
+        key="ses_secimi"   # key eklendi
     )
 
     st.markdown("**🔑 Key'ler**")
@@ -125,7 +136,8 @@ with st.sidebar:
 uploaded_video = st.file_uploader(
     "🎥 Referans Video",
     type=['mp4', 'mov', 'webm'],
-    help="Yüklersen AI analiz eder, yüklemezsen aşağıya kendi analizini yazarsın"
+    help="Yüklersen AI analiz eder, yüklemezsen aşağıya kendi analizini yazarsın",
+    key="video_uploader"   # key eklendi
 )
 video_buyuk = uploaded_video is not None and uploaded_video.size > 20 * 1024 * 1024
 
@@ -139,21 +151,33 @@ with c1:
     video_analiz_notlari = st.text_area(
         "🔍 Analiz Notları",
         height=90,
-        placeholder="Video varsa: 'Motor sesi bul'\nVideo yoksa: Kendi analizin"
+        placeholder="Video varsa: 'Motor sesi bul'\nVideo yoksa: Kendi analizin",
+        key="video_analiz_notlari"   # key eklendi
     )
 with c2:
     metin_uretim_notlari = st.text_area(
         "✍️ Üretim Notları",
         height=90,
-        placeholder="'Fiyat söyleme'\n'Performans vurgula'"
+        placeholder="'Fiyat söyleme'\n'Performans vurgula'",
+        key="metin_uretim_notlari"   # key eklendi
     )
 
-sure_saniye = st.number_input("⏱️ Hedef Süre (sn)", min_value=5, max_value=180, value=30, step=5)
+# --- SORUN GİDERİLDİ: Bu satıra key eklendi ve değer int() ile garanti edildi ---
+sure_saniye = int(st.number_input(
+    "⏱️ Hedef Süre (sn)",
+    min_value=5,
+    max_value=180,
+    value=st.session_state.sure_saniye,
+    step=5,
+    key="sure_saniye"   # ← BURASI ÇOK ÖNEMLİ
+))
+
 icerik_tonu = st.radio(
     "🎯 İçerik Tonu",
     ["🎭 Eğlence Ağırlıklı (%25 bilgi)", "⚖️ Dengeli (%50 bilgi)", "🧠 Bilgi Ağırlıklı (%75 bilgi)", "📊 Teknik Odaklı (%90 bilgi)"],
     index=1,
-    horizontal=True
+    horizontal=True,
+    key="icerik_tonu"   # key eklendi
 )
 
 buton_tiklandi = st.button("🚀 ÜRET!", disabled=video_buyuk, use_container_width=True)
