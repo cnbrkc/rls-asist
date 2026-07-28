@@ -1,0 +1,182 @@
+🏎️ otoXtra Proje Mimarisi ve İşleyiş Şeması
+1. Proje Amacı
+
+otoXtra, kullanıcının yüklediği bir referans videosunu (veya manuel analiz notlarını) kullanarak:
+
+    Reels açıklaması (hashtag'lerle birlikte)
+
+    Kapak başlıkları (5 alternatif)
+
+    Threads/X gönderisi (sohbet havasında kısa metin)
+
+    Seslendirme metni ve TTS ses dosyası (hızlandırılmış)
+    otomatik olarak üreten bir Streamlit uygulamasıdır.
+
+Google Gemini API (çoklu anahtar desteği) kullanır, akıllı hata yönetimi (cooldown/ban) ile kesintisiz çalışmayı hedefler.
+2. Dosya Yapısı ve Sorumluluklar
+text
+
+rls-asist/
+├── app.py                 # Uygulama giriş noktası (sadece ui'yi import eder)
+├── config.py              # Tüm sabitler, API anahtarları, model listeleri, cooldown süreleri
+├── utils.py               # Yardımcı fonksiyonlar (dosya/JSON işlemleri, ses hızlandırma, kayıt yönetimi, prompt oluşturma)
+├── router.py              # SmartRouter sınıfı (API istekleri, hata yönetimi, model rotalama)
+├── ui.py                  # Streamlit arayüzü (sidebar, ana form, sonuç gösterimi, loglar, yeniden ses üretme)
+│
+├── guncellik_talimati.txt # Prompt bileşeni: güncel tarih bilgisi
+├── kurallar.txt           # Temel kurallar ve kısıtlamalar
+├── sistem_talimati.txt    # Sistem talimatı (kelime sayısı, ton, bilgi oranı)
+├── threads_promptu.txt    # Threads dönüşüm promptu
+├── video_analiz_promptu.txt # Video analiz promptu
+│
+├── requirements.txt       # Python bağımlılıkları
+└── packages.txt           # Sistem paketleri (ör. ffmpeg)
+
+3. Modüller Arası İlişki (Bağımlılık Grafiği)
+
+    ui.py kullanıcı etkileşimini yönetir, router ve utils fonksiyonlarını çağırır.
+
+    router.py API çağrılarını gerçekleştirir, hata durumlarında ban/cooldown mekanizmasını çalıştırır.
+
+    utils.py saf yardımcı fonksiyonları içerir (dosya okuma, JSON parse, ses işleme, kayıt yönetimi).
+
+    config.py tüm sabit değerleri tek bir merkezden sağlar.
+
+4. Veri Akışı (İşlem Adımları)
+4.1. Kullanıcı Girdileri
+
+    Video dosyası (isteğe bağlı, mp4/mov/webm) veya manuel analiz notları
+
+    Analiz notları (video varsa ek ipuçları, yoksa tam analiz metni)
+
+    Üretim notları (özel talimatlar, yasaklar, vurgular)
+
+    Hedef süre (saniye, 5-180)
+
+    İçerik tonu (Eğlence, Dengeli, Bilgi, Teknik)
+
+    Ses seçimi (11 farklı TTS sesi)
+
+4.2. Üretim Akışı (4 Adım)
+Adım	Açıklama	Hangi Modül/Model
+1️⃣ Video Analiz	Video varsa Gemini ile analiz edilir; yoksa manuel notlar kullanılır. Google Search aracı aktif.	router.video_analiz_et() → Video Analiz Modelleri
+2️⃣ Metin Üretimi	Video analizi + üretim notları + sistem talimatı → JSON çıktısı (beyin fırtınası, veri kilitleme, öz eleştiri, ses metni, reels açıklaması, hashtag'ler, kapak başlıkları). Arama kapalı.	router.metin_uret() → Metin Modelleri
+3️⃣ Threads Üretimi	Reels açıklamasından sohbet havasında kısa metin üretilir. Hata durumunda fallback.	router.metin_uret() (farklı prompt) → Metin Modelleri
+4️⃣ Ses Üretimi	Seslendirme metni TTS'e gönderilir, çıkan WAV hızlandırılır (ffmpeg atempo).	router.ses_uret() → Ses Modelleri
+4.3. Sonuçların Gösterimi
+
+    Ses oynatıcı + indirme butonu
+
+    Reels açıklaması (hashtag'lerle), kapak başlıkları, Threads metni
+
+    AI'nın iç monoloğu (beyin fırtınası, veri kilitleme, öz eleştiri)
+
+    Seslendirme metni (düzenlenebilir ve yeniden ses üretilebilir)
+
+5. Akıllı Router (SmartRouter) Çalışma Prensibi
+5.1. Amaç
+
+    Birden fazla API anahtarını (farklı e‑posta hesaplarına ait) yönetir.
+
+    Model bazında, anahtar bazında veya kombinasyon bazında cooldown/ban uygular.
+
+    Hata türlerine göre farklı stratejiler uygular:
+
+        free_tier_yok (limit: 0) → model tamamen 7 gün banlanır.
+
+        quota (429) → anahtar belirli bir süre banlanır (retryDelay varsa onu kullanır).
+
+        sunucu hatası (503) → kombinasyon 15 dakika banlanır.
+
+        model bulunamadı (404) → model tüm anahtarlar için 24 saat banlanır.
+
+        Diğer hatalar → kombinasyon 5 dakika banlanır.
+
+5.2. Rotasyon Mantığı
+
+    Verilen model listesinde sırayla dolaşır.
+
+    Her model için tüm anahtarları dener (ban kontrolü yaparak).
+
+    Başarılı olan ilk kombinasyon kullanılır.
+
+    Tüm kombinasyonlar başarısız olursa hata fırlatılır.
+
+5.3. Blacklist Yapısı
+
+    st.session_state.blacklist sözlüğünde anahtarlar:
+
+        *+model : model bazlı ban
+
+        mail+* : anahtar bazlı ban
+
+        mail+model : spesifik kombinasyon banı
+
+    Değer olarak bitiş zamanı (timestamp) tutulur.
+
+6. Önemli Sabitler ve Değişkenler (config.py)
+Değişken	Açıklama	Varsayılan
+API_KEYS	Streamlit secrets'tan okunan dict	{"mail1":"key1", ...}
+VIDEO_ANALIZ_MODELLERI	Video analiz için kullanılacak modeller	["gemini-3.6-flash", "gemini-2.5-flash"]
+METIN_MODELLERI	Metin üretimi için modeller	["gemini-3.6-flash", "gemini-2.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
+SES_MODELLERI	TTS için modeller	["gemini-2.5-flash-preview-tts"]
+MAX_INPUT_KARAKTER	Giriş metni maksimum karakter	900.000
+SES_HIZ_CARpanI	TTS çıktısının hızlandırma oranı	1.2 (%20 hızlı)
+MAX_KAYIT	Geçmişte tutulacak maksimum kayıt sayısı	5
+Cooldown süreleri	Çeşitli hata türleri için bekleme süreleri	(bkz. config.py)
+7. Prompt Sistemi (Dış Dosyalar)
+
+    guncellik_talimati.txt: Güncel tarihi formata ekler.
+
+    kurallar.txt: Temel yasaklar, yapılandırıcı kurallar.
+
+    sistem_talimati.txt: Kelime sayısı, ton, bilgi/eğlence oranı, güncellik talimatı.
+
+    threads_promptu.txt: Instagram açıklamasını Threads/X formatına dönüştürür.
+
+    video_analiz_promptu.txt: Video analizi için özel prompt (görsel ve metin girdisi).
+
+Tüm bu dosyalar utils.prompt_dosyasini_oku() ile okunur ve format() ile değişkenler yerleştirilir.
+8. Kayıt ve Geçmiş Sistemi
+
+    kayitlar.json dosyasında son 5 üretim saklanır.
+
+    Her kayıt: tarih, seslendirme metni, reels açıklaması, hashtag'ler, kapak başlıkları, threads açıklaması, ses adı, süre.
+
+    Sidebar'da geçmiş kayıtlar buton olarak listelenir; tıklanınca sonuçlar geri yüklenir (ses dosyası hariç).
+
+    "Tüm Geçmişi Sil" butonu ile dosya temizlenir.
+
+9. Hata Yönetimi ve Loglama
+
+    Tüm işlem adımları log_ekle() ile kullanıcıya gösterilir (kod penceresinde).
+
+    Hata durumunda traceback.format_exc() alınır, API anahtarları gizlenir (***) ve loga eklenir.
+
+    Kullanıcıya hata mesajı gösterilir, logları kopyalaması istenir.
+
+10. Performans ve Güvenlik Notları
+
+    ffmpeg gereklidir (ses hızlandırma için). Sunucuda kurulu olmalıdır.
+
+    Streamlit secrets kullanılır, API anahtarları .streamlit/secrets.toml içinde saklanır.
+
+    st.stop() kullanımı doğru akışı keser; hata durumlarında kullanılır.
+
+    Geçici ses dosyaları 24 saat sonra otomatik temizlenir.
+
+    Video boyutu 20 MB ile sınırlıdır (Streamlit file_uploader varsayılanı).
+
+11. Geliştirme ve Genişletme İpuçları
+
+    Yeni bir model eklemek için config.py'deki model listelerine ekleyin.
+
+    Yeni bir hata türü eklemek için router._parse_hata() metodunu genişletin.
+
+    Yeni bir prompt dosyası eklemek için dosyayı ana klasöre koyun ve utils.prompt_dosyasini_oku() ile çağırın.
+
+    Farklı bir TTS sesi eklemek için ses_secimi selectbox'una ekleyin (İngilizce isimlerle).
+
+    Yeni bir çıktı alanı (ör. YouTube açıklaması) eklemek için response_schema'yı ve UI gösterimini genişletin.
+
+Bu metin, projeyi anlamak, geliştirmek veya yapay zeka asistanlarına açıklamak için kullanılabilir. Tüm dosyaların işlevleri, veri akışı ve akıllı router mekanizması açıkça belirtilmiştir.
