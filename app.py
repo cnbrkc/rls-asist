@@ -796,17 +796,58 @@ if st.session_state.sonuc:
     st.markdown("### 🎙️ Seslendirme Metni")
     st.caption("TTS için üretilen metin. Düzenleyip yeniden ses üretebilirsiniz.")
 
-    duzenlenmis_ses_metni = st.text_area("Seslendirme Metni", value=veri.get("seslendirme_metni", ""), height=300, label_visibility="collapsed")
+    duzenlenmis_ses_metni = st.text_area(
+        "Seslendirme Metni",
+        value=veri.get("seslendirme_metni", ""),
+        height=300,
+        label_visibility="collapsed",
+        key="duzenlenmis_ses_metni_widget",
+    )
 
     if st.button("🔄 Bu Metinle Yeniden Ses Üret"):
         with st.spinner("Ses üretiliyor..."):
             yeni_ses_dosyasi = os.path.join(tempfile.gettempdir(), f"ses_{uuid.uuid4().hex[:8]}.wav")
-            ses_basarili_yeni, _ = router.ses_uret(duzenlenmis_ses_metni, sonuc["secilen_ses_ingilizce"], yeni_ses_dosyasi, log_ekle, hiz_carpani=SES_HIZ_CARpanI)
+            ses_basarili_yeni, kullanilan_ses_modeli_yeni = router.ses_uret(
+                duzenlenmis_ses_metni,
+                sonuc["secilen_ses_ingilizce"],
+                yeni_ses_dosyasi,
+                log_ekle,
+                hiz_carpani=SES_HIZ_CARpanI,
+            )
+
             if ses_basarili_yeni and os.path.exists(yeni_ses_dosyasi):
-                with open(yeni_ses_dosyasi, "rb") as f: yeni_ses_byte = f.read()
-                st.audio(yeni_ses_byte, format="audio/wav")
-                st.download_button("⬇️ Yeniden Üretilen Sesi İndir (.wav)", yeni_ses_byte, file_name="seslendirme_yeni.wav", mime="audio/wav")
+                # 1) Eski ses dosyasını diskten ve takip listesinden temizle
+                eski_ses_dosyasi = sonuc.get("ses_dosyasi", "")
+                if eski_ses_dosyasi and os.path.exists(eski_ses_dosyasi):
+                    temp_dosya_temizle(eski_ses_dosyasi)
+                    if eski_ses_dosyasi in st.session_state.gecici_ses_dosyalari:
+                        st.session_state.gecici_ses_dosyalari.remove(eski_ses_dosyasi)
+
+                # 2) Session state'i YENİ ses dosyasıyla güncelle.
+                #    Üstteki ana player (satır 754) sonuc["ses_dosyasi"]'i okur;
+                #    bu nedenle player'ın yeni sesi çalması için BURAYI güncellemek zorundayız.
+                st.session_state.sonuc["ses_dosyasi"] = yeni_ses_dosyasi
+                st.session_state.sonuc["ses_basarili"] = True
+
+                # 3) Düzenlenmiş metni de veriye geri yaz ki sonraki render'da
+                #    text_area ve player tutarlı görünsün.
+                st.session_state.sonuc["veri"]["seslendirme_metni"] = duzenlenmis_ses_metni
+
+                # 4) Kullanılan ses modelini güncelle (UI alt başlığında gösteriliyor)
+                if kullanilan_ses_modeli_yeni:
+                    st.session_state.sonuc["kullanilan_ses_modeli"] = kullanilan_ses_modeli_yeni
+
+                # 5) Yeni dosyayı takip listesine ekle (24 saat sonra otomatik temizlenir)
                 st.session_state.gecici_ses_dosyalari.append(yeni_ses_dosyasi)
-                st.success("✅ Yeni ses başarıyla üretildi!")
+
+                log_ekle("✅ Yeni ses başarıyla üretildi, player güncellendi.")
+
+                # 6) st.rerun() → script en baştan çalışır, if st.button bloğu artık
+                #    False döner (momentary) ve transient render'a gerek kalmaz.
+                #    Üstteki ana player artık yeni ses dosyasını çalar.
+                st.rerun()
             else:
-                st.error("❌ Ses üretilemedi.")
+                st.error("❌ Ses üretilemedi. Logları kontrol edin.")
+                # Üretilen boş/kısmi dosya kaldıysa temizle
+                if os.path.exists(yeni_ses_dosyasi):
+                    temp_dosya_temizle(yeni_ses_dosyasi)
