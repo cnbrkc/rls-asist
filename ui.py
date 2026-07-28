@@ -5,9 +5,10 @@ import os
 import uuid
 import traceback
 import re
+import tempfile  # ← EKLENDİ
 
 # Kendi modüllerimiz
-from config import API_KEYS, SES_HIZ_CARpanI, MAX_INPUT_KARAKTER
+from config import API_KEYS, SES_HIZ_CARpanI, MAX_INPUT_KARAKTER, METIN_MODELLERI  # ← METIN_MODELLERI EKLENDİ
 from utils import (
     kayitlari_yukle, tum_kayitlari_sil, kayit_ekle,
     eski_ses_dosyalarini_temizle, prompt_dosyasini_oku,
@@ -76,7 +77,7 @@ with st.sidebar:
             "Umbriel (Rahat - Erkek)"
         ],
         label_visibility="collapsed",
-        key="ses_secimi"   # key eklendi
+        key="ses_secimi"
     )
 
     st.markdown("**🔑 Key'ler**")
@@ -137,7 +138,7 @@ uploaded_video = st.file_uploader(
     "🎥 Referans Video",
     type=['mp4', 'mov', 'webm'],
     help="Yüklersen AI analiz eder, yüklemezsen aşağıya kendi analizini yazarsın",
-    key="video_uploader"   # key eklendi
+    key="video_uploader"
 )
 video_buyuk = uploaded_video is not None and uploaded_video.size > 20 * 1024 * 1024
 
@@ -152,24 +153,24 @@ with c1:
         "🔍 Analiz Notları",
         height=90,
         placeholder="Video varsa: 'Motor sesi bul'\nVideo yoksa: Kendi analizin",
-        key="video_analiz_notlari"   # key eklendi
+        key="video_analiz_notlari"
     )
 with c2:
     metin_uretim_notlari = st.text_area(
         "✍️ Üretim Notları",
         height=90,
         placeholder="'Fiyat söyleme'\n'Performans vurgula'",
-        key="metin_uretim_notlari"   # key eklendi
+        key="metin_uretim_notlari"
     )
 
-# --- SORUN GİDERİLDİ: Bu satıra key eklendi ve değer int() ile garanti edildi ---
+# --- SORUN GİDERİLDİ ---
 sure_saniye = int(st.number_input(
     "⏱️ Hedef Süre (sn)",
     min_value=5,
     max_value=180,
     value=st.session_state.sure_saniye,
     step=5,
-    key="sure_saniye"   # ← BURASI ÇOK ÖNEMLİ
+    key="sure_saniye"
 ))
 
 icerik_tonu = st.radio(
@@ -177,7 +178,7 @@ icerik_tonu = st.radio(
     ["🎭 Eğlence Ağırlıklı (%25 bilgi)", "⚖️ Dengeli (%50 bilgi)", "🧠 Bilgi Ağırlıklı (%75 bilgi)", "📊 Teknik Odaklı (%90 bilgi)"],
     index=1,
     horizontal=True,
-    key="icerik_tonu"   # key eklendi
+    key="icerik_tonu"
 )
 
 buton_tiklandi = st.button("🚀 ÜRET!", disabled=video_buyuk, use_container_width=True)
@@ -301,7 +302,15 @@ if buton_tiklandi:
         threads_schema = {"type": "OBJECT", "properties": {"threads_aciklamasi": {"type": "STRING"}}, "required": ["threads_aciklamasi"]}
 
         try:
-            threads_veri, kullanilan_threads_modeli = router.metin_uret(threads_icerigi, threads_system_prompt, threads_schema, log_ekle, model_listesi=METIN_MODELLERI, arama_kullan=False)
+            # METIN_MODELLERI artık import edildi, sorun yok
+            threads_veri, kullanilan_threads_modeli = router.metin_uret(
+                threads_icerigi,
+                threads_system_prompt,
+                threads_schema,
+                log_ekle,
+                model_listesi=METIN_MODELLERI,
+                arama_kullan=False
+            )
             veri["threads_aciklamasi"] = str(threads_veri.get("threads_aciklamasi", "")).strip()
         except Exception as threads_hata:
             log_ekle(f"⚠️ Threads hatası, fallback kullanılıyor: {str(threads_hata)[:100]}")
