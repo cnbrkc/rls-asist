@@ -16,6 +16,21 @@ from config import (
     TURKCE_AYLAR, SES_HIZ_CARpanI,
 )
 
+# ===== FFMPEG YOLU (Streamlit Cloud uyumlu) =====
+def _ffmpeg_yolu_bul() -> str:
+    """Streamlit Cloud'da ffmpeg yolunu bul (önce imageio-ffmpeg, sonra sistem PATH)"""
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except (ImportError, Exception):
+        pass
+    sistem_ffmpeg = shutil.which("ffmpeg")
+    if sistem_ffmpeg:
+        return sistem_ffmpeg
+    return "ffmpeg"
+
+FFMPEG_BIN = _ffmpeg_yolu_bul()
+
 # ===== TARİH =====
 def guncel_tarih_metni() -> str:
     simdi = datetime.now()
@@ -24,7 +39,6 @@ def guncel_tarih_metni() -> str:
 # ===== PROMPT DOSYASI OKUMA =====
 def prompt_dosyasini_oku(dosya_adi: str) -> str:
     try:
-        # Dosya yolunu projenin kendi dizinine göre çöz (Streamlit Cloud uyumlu)
         tam_yol = os.path.join(os.path.dirname(os.path.abspath(__file__)), dosya_adi)
         with open(tam_yol, "r", encoding="utf-8") as f:
             return f.read()
@@ -110,9 +124,7 @@ def sesi_hizlandir(giris_dosyasi: str, cikti_dosyasi: str, hiz_carpani: float, l
             log_ekle(f"⚠️ Ses kopyalanamadı: {e}")
             return False
     # ffmpeg atempo filtresi sadece 0.5–2.0 arası değerleri kabul eder
-    # Sınırların dışındaki değerler için zincirleme atempo uygula
     if hiz_carpani < 0.5 or hiz_carpani > 2.0:
-        log_ekle(f"⚠️ atempo={hiz_carpani} ffmpeg sınırı dışında (0.5-2.0), zincirleme filtre uygulanıyor...")
         carpanlar = []
         kalan = hiz_carpani
         while kalan > 2.0:
@@ -127,7 +139,7 @@ def sesi_hizlandir(giris_dosyasi: str, cikti_dosyasi: str, hiz_carpani: float, l
         atempo_str = f"atempo={hiz_carpani}"
 
     komut = [
-        "ffmpeg", "-y", "-i", giris_dosyasi,
+        FFMPEG_BIN, "-y", "-i", giris_dosyasi,
         "-filter:a", atempo_str,
         "-ar", "24000", "-ac", "1", "-sample_fmt", "s16",
         cikti_dosyasi
@@ -148,7 +160,7 @@ def sesi_hizlandir(giris_dosyasi: str, cikti_dosyasi: str, hiz_carpani: float, l
         log_ekle(f"⚠️ ffmpeg beklenmeyen hata: {e}")
         return False
 
-# ===== VİDEO SÜRE TESPİTİ VE İŞLEME =====
+# ===== VİDEO SÜRE TESPİTİ =====
 def video_suresini_al(video_yolu: str) -> float:
     try:
         import cv2
@@ -163,128 +175,38 @@ def video_suresini_al(video_yolu: str) -> float:
                     return sure
     except Exception:
         pass
-
-    komut = [
-        "ffprobe", "-v", "error",
-        "-select_streams", "v:0",
-        "-show_entries", "format=duration",
-        "-of", "default=noprint_wrappers=1:nokey=1",
-        video_yolu
-    ]
-    try:
-        sonuc = subprocess.run(komut, capture_output=True, text=True, timeout=5)
-        if sonuc.returncode == 0 and sonuc.stdout.strip():
-            val = float(sonuc.stdout.strip())
-            if val > 0:
-                return val
-    except Exception:
-        pass
-
     return 30.0
 
-def kapak_fotografi_cikar(video_yolu: str, saniye: float, cikti_resim_yolu: str, log_ekle) -> bool:
+# ===== VİDEO + SES BİRLEŞTİRME (BASİT — 4K YOK, KAPAK YOK) =====
+def video_ve_sesi_birlestir(video_yolu: str, ses_yolu: str, cikti_v_yolu: str, log_ekle) -> bool:
+    """Videoya AI sesini ekle (4K upscale yok, kapak yok — sadece ses + video birleştirme)"""
     komut = [
-        "ffmpeg", "-y",
-        "-ss", str(saniye),
+        FFMPEG_BIN, "-y",
         "-i", video_yolu,
-        "-vframes", "1",
-        "-q:v", "2",
-        cikti_resim_yolu
+        "-i", ses_yolu,
+        "-c:v", "copy",
+        "-c:a", "aac", "-b:a", "192k",
+        "-shortest",
+        "-map", "0:v:0",
+        "-map", "1:a:0",
+        cikti_v_yolu
     ]
     try:
-        sonuc = subprocess.run(komut, capture_output=True, text=True, timeout=30)
-        return sonuc.returncode == 0 and os.path.exists(cikti_resim_yolu)
-    except Exception as e:
-        log_ekle(f"⚠️ Kapak fotoğrafı çıkarılamadı: {e}")
-        return False
-
-def video_ve_sesi_birlestir_4k_ve_senkronize(
-    video_yolu: str,
-    ses_yolu: str,
-    kapak_saniyesi: float,
-    cikti_v_yolu: str,
-    cikti_kapak_yolu: str,
-    log_ekle
-) -> bool:
-    try:
-        log_ekle(f"📸 En çarpıcı kapak anı ({kapak_saniyesi}n) fotoğrafa dönüştürülüyor...")
-        kapak_fotografi_cikar(video_yolu, kapak_saniyesi, cikti_kapak_yolu, log_ekle)
-
-        video_sure = video_suresini_al(video_yolu)
-        with wave.open(ses_yolu, "rb") as wf:
-            frames = wf.getnframes()
-            rate = wf.getframerate()
-            audio_sure = frames / rate
-
-        log_ekle(f"⏱️ Video süresi: {video_sure:.2f}sn | Ses süresi: {audio_sure:.2f}sn")
-
-        hiz_orani = audio_sure / video_sure if video_sure > 0 else 1.0
-
-        intro_yolu = os.path.join(tempfile.gettempdir(), f"intro_{uuid.uuid4().hex[:8]}.mp4")
-        vars_kapak = cikti_kapak_yolu if os.path.exists(cikti_kapak_yolu) else None
-        
-        has_intro = False
-        if vars_kapak:
-            intro_komut = [
-                "ffmpeg", "-y",
-                "-loop", "1",
-                "-i", vars_kapak,
-                "-t", "0.5",
-                "-c:v", "libx264",
-                "-pix_fmt", "yuv420p",
-                "-r", "30",
-                intro_yolu
-            ]
-            res_intro = subprocess.run(intro_komut, capture_output=True, text=True, timeout=30)
-            if res_intro.returncode == 0 and os.path.exists(intro_yolu):
-                has_intro = True
-
-        if has_intro:
-            filter_str = f"[0:v]scale=2160:3840:force_original_aspect_ratio=increase,crop=2160:3840,setsar=1[v0];" \
-                         f"[1:v]scale=2160:3840:force_original_aspect_ratio=increase,crop=2160:3840,setsar=1[v1];" \
-                         f"[v0][v1]concat=n=2:v=1:a=0[vcat];" \
-                         f"[vcat]setpts=PTS*{hiz_orani}[vfin]"
-            komut = [
-                "ffmpeg", "-y",
-                "-i", intro_yolu,
-                "-i", video_yolu,
-                "-i", ses_yolu,
-                "-filter_complex", filter_str,
-                "-map", "[vfin]",
-                "-map", "2:a:0",
-                "-c:v", "libx264", "-preset", "medium", "-crf", "18",
-                "-c:a", "aac", "-b:a", "192k",
-                "-shortest",
-                cikti_v_yolu
-            ]
-        else:
-            filter_str = f"[0:v]scale=2160:3840:force_original_aspect_ratio=increase,crop=2160:3840,setsar=1,setpts=PTS*{hiz_orani}[vfin]"
-            komut = [
-                "ffmpeg", "-y",
-                "-i", video_yolu,
-                "-i", ses_yolu,
-                "-filter_complex", filter_str,
-                "-map", "[vfin]",
-                "-map", "1:a:0",
-                "-c:v", "libx264", "-preset", "medium", "-crf", "18",
-                "-c:a", "aac", "-b:a", "192k",
-                "-shortest",
-                cikti_v_yolu
-            ]
-
-        log_ekle("🎬 4K Upscale (boşluksuz, kırpmalı), süre senkronizasyonu ve ses birleştirme yapılıyor...")
-        proje = subprocess.run(komut, capture_output=True, text=True, timeout=600)
-        
-        temp_dosya_temizle(intro_yolu)
-
-        if proje.returncode != 0:
-            log_ekle(f"⚠️ FFmpeg 4K render hata: {proje.stderr[-400:] if proje.stderr else 'bilinmeyen'}")
+        log_ekle("🎬 Videoya AI sesi ekleniyor (4K upscale kapalı, orijinal çözünürlük)...")
+        sonuc = subprocess.run(komut, capture_output=True, text=True, timeout=300)
+        if sonuc.returncode != 0:
+            log_ekle(f"⚠️ ffmpeg hata: {sonuc.stderr[-300:] if sonuc.stderr else 'bilinmeyen'}")
             return False
-        
-        log_ekle("✅ 4K Video, kapak fotoğrafı ve ses senkronizasyonu başarıyla tamamlandı!")
+        log_ekle("✅ Video ve ses başarıyla birleştirildi!")
         return True
+    except FileNotFoundError:
+        log_ekle("⚠️ ffmpeg bulunamadı!")
+        return False
+    except subprocess.TimeoutExpired:
+        log_ekle("⚠️ ffmpeg zaman aşımına uğradı.")
+        return False
     except Exception as e:
-        log_ekle(f"⚠️ 4K render beklenmeyen hata: {e}")
+        log_ekle(f"⚠️ Video-ses birleştirme hatası: {e}")
         return False
 
 # ===== KAYIT YÖNETİMİ =====
@@ -342,9 +264,10 @@ def video_analiz_promptunu_olustur(ek_notlar_bolumu: str, sure_saniye: int) -> s
     )
 
 def sistem_talimati_olustur(sure_saniye: int, icerik_tonu: str) -> str:
-    # Saniyeye birebir oranlanmış kelime hedefi (örn. 16 saniye -> ~40-45 kelime)
-    hedef_kelime = round(sure_saniye * 2.5 / 5) * 5
-    min_kelime = max(5, int(hedef_kelime * 0.9))
+    # Kelime hedefi: TTS modeli Türkçe'de ~1.7 kelime/saniye üretiyor
+    # 2.0 k/s hedefle → AI biraz fazlaysa bile video süresine yakın kalır
+    hedef_kelime = round(sure_saniye * 2.0 / 5) * 5
+    min_kelime = max(5, int(hedef_kelime * 0.85))
     max_kelime = int(hedef_kelime * 1.1)
 
     if "Eğlence Ağırlıklı" in icerik_tonu:
