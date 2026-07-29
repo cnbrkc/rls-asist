@@ -242,9 +242,14 @@ if buton_tiklandi and uploaded_video is not None:
     try:
         # OTOMATİK SÜRE TESPİTİ
         sure_saniye = int(round(video_suresini_al(temp_input_video)))
-        if sure_saniye < 5:
-            sure_saniye = 5
-        log_ekle(f"⏱️ Otomatik tespit edilen video süresi: {sure_saniye} saniye")
+        if sure_saniye < 1:
+            st.warning("⚠️ Videonun süresi otomatik okunamadı! Lütfen videonun süresini (saniye cinsinden) aşağıya girin:")
+            manual_sure = st.number_input("⏱️ Manuel Süre Girişi (sn)", min_value=1, max_value=300, value=30, step=1, key="manual_sure_input")
+            if st.button("Devam Et", key="manual_sure_btn"):
+                sure_saniye = int(manual_sure)
+            else:
+                st.stop()
+        log_ekle(f"⏱️ Video süresi: {sure_saniye} saniye")
 
         # ADIM 1: Video Analiz
         ilerlemeyi_guncelle(1, 4, "🎥 Video analiz ediliyor (Kapak anı tespit ediliyor)...")
