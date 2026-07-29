@@ -5,15 +5,15 @@ import os
 import uuid
 import traceback
 import re
-import tempfile  # ← EKLENDİ
+import tempfile
 
 # Kendi modüllerimiz
-from config import API_KEYS, SES_HIZ_CARpanI, MAX_INPUT_KARAKTER, METIN_MODELLERI  # ← METIN_MODELLERI EKLENDİ
+from config import API_KEYS, SES_HIZ_CARpanI, MAX_INPUT_KARAKTER, METIN_MODELLERI
 from utils import (
     kayitlari_yukle, tum_kayitlari_sil, kayit_ekle,
     eski_ses_dosyalarini_temizle, prompt_dosyasini_oku,
     sistem_talimati_olustur, markdown_temizle, kapak_basliklarini_formatla,
-    temp_dosya_temizle
+    temp_dosya_temizle, video_suresini_al, video_ve_sesi_birlestir_4k_ve_senkronize
 )
 from router import SmartRouter
 
@@ -36,7 +36,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown("### 🏎️ otoXtra")
-st.caption("Reels + Threads otomatik üretim")
+st.caption("Reels + Threads otomatik üretim & 4K Ses/Görsel Optimizasyonu")
 
 # ============================================================
 # SESSION STATE BAŞLATMA
@@ -48,9 +48,6 @@ if "log_satirlari" not in st.session_state:
 if "gecici_ses_dosyalari" not in st.session_state:
     st.session_state.gecici_ses_dosyalari = []
 
-# Widget'lar için session state başlangıç değerleri
-if "sure_saniye" not in st.session_state:
-    st.session_state.sure_saniye = 30
 if "video_analiz_notlari" not in st.session_state:
     st.session_state.video_analiz_notlari = ""
 if "metin_uretim_notlari" not in st.session_state:
@@ -122,6 +119,9 @@ with st.sidebar:
                     "kullanilan_metin_modeli": "geçmiş",
                     "kullanilan_ses_modeli": "geçmiş",
                     "kullanilan_threads_modeli": "geçmiş",
+                    "kapak_saniyesi": 1.0,
+                    "kapak_resmi_yolu": "",
+                    "final_4k_video": ""
                 }
                 st.rerun()
     else:
@@ -135,43 +135,33 @@ with st.sidebar:
 # ANA ARAYÜZ
 # ============================================================
 uploaded_video = st.file_uploader(
-    "🎥 Referans Video",
+    "🎥 Referans Video (Süre ve kapak otomatik algılanır)",
     type=['mp4', 'mov', 'webm'],
-    help="Yüklersen AI analiz eder, yüklemezsen aşağıya kendi analizini yazarsın",
+    help="Videoyu yüklersiniz; süre otomatik tespit edilir ve ses/4K render buna göre ayarlanır.",
     key="video_uploader"
 )
-video_buyuk = uploaded_video is not None and uploaded_video.size > 20 * 1024 * 1024
+video_buyuk = uploaded_video is not None and uploaded_video.size > 50 * 1024 * 1024
 
 if uploaded_video is not None:
     st.video(uploaded_video)
     if video_buyuk:
-        st.warning("⚠️ Video 20 MB üstü! Sıkıştırın.")
+        st.warning("⚠️ Video 50 MB üstü! Sıkıştırmanız önerilir.")
 
 c1, c2 = st.columns(2)
 with c1:
     video_analiz_notlari = st.text_area(
         "🔍 Analiz Notları",
         height=90,
-        placeholder="Video varsa: 'Motor sesi bul'\nVideo yoksa: Kendi analizin",
+        placeholder="Örn: 'Araç hızlanma anını vurgula'",
         key="video_analiz_notlari"
     )
 with c2:
     metin_uretim_notlari = st.text_area(
         "✍️ Üretim Notları",
         height=90,
-        placeholder="'Fiyat söyleme'\n'Performans vurgula'",
+        placeholder="Örn: 'Fiyat söyleme, performansa odaklan'",
         key="metin_uretim_notlari"
     )
-
-# --- SORUN GİDERİLDİ ---
-sure_saniye = int(st.number_input(
-    "⏱️ Hedef Süre (sn)",
-    min_value=5,
-    max_value=180,
-    value=st.session_state.sure_saniye,
-    step=5,
-    key="sure_saniye"
-))
 
 icerik_tonu = st.radio(
     "🎯 İçerik Tonu",
@@ -181,7 +171,9 @@ icerik_tonu = st.radio(
     key="icerik_tonu"
 )
 
-buton_tiklandi = st.button("🚀 ÜRET!", disabled=video_buyuk, use_container_width=True)
+buton_tiklandi = st.button("🚀 ÜRET VE 4K HAZIRLA!", disabled=uploaded_video is None, use_container_width=True)
+if uploaded_video is None:
+    st.info("💡 Devam etmek için lütfen yukarıdan bir video yükleyin.")
 
 progress_bar = st.empty()
 log_kutusu = st.empty()
@@ -237,31 +229,44 @@ gunlugu_ciz()
 # ============================================================
 # ÜRETİM AKIŞI
 # ============================================================
-if buton_tiklandi:
+if buton_tiklandi and uploaded_video is not None:
     sekmeyi_aktif_tut()
     st.session_state.log_satirlari = []
     log_ekle("🚀 Üretim başladı...")
     ilerlemeyi_guncelle(0, 4, "Başlatılıyor...")
 
+    temp_input_video = os.path.join(tempfile.gettempdir(), f"input_{uuid.uuid4().hex[:8]}.mp4")
+    with open(temp_input_video, "wb") as f:
+        f.write(uploaded_video.getvalue())
+
     try:
+        # OTOMATİK SÜRE TESPİTİ
+        sure_saniye = int(round(video_suresini_al(temp_input_video)))
+        if sure_saniye < 5:
+            sure_saniye = 5
+        log_ekle(f"⏱️ Otomatik tespit edilen video süresi: {sure_saniye} saniye")
+
         # ADIM 1: Video Analiz
-        ilerlemeyi_guncelle(1, 4, "🎥 Video analiz ediliyor...")
-        if uploaded_video is not None:
-            log_ekle("🎥 Video analiz ediliyor...")
-            analiz_metni, _ = router.video_analiz_et(
-                uploaded_video.getvalue(),
-                uploaded_video.type or "video/mp4",
-                video_analiz_notlari,
-                sure_saniye,
-                log_ekle
-            )
-            log_ekle("🧠 Analiz tamamlandı, üretiliyor...")
-        else:
-            if not video_analiz_notlari.strip():
-                st.warning("⚠️ Video yok, analiz notu yazın.")
-                st.stop()
-            analiz_metni = video_analiz_notlari.strip()
-            log_ekle("📝 Manuel analiz kullanılıyor...")
+        ilerlemeyi_guncelle(1, 4, "🎥 Video analiz ediliyor (Kapak anı tespit ediliyor)...")
+        log_ekle("🎥 Video analiz ediliyor...")
+        
+        analiz_metni, _ = router.video_analiz_et(
+            uploaded_video.getvalue(),
+            uploaded_video.type or "video/mp4",
+            video_analiz_notlari,
+            sure_saniye,
+            log_ekle
+        )
+
+        # Kapak anı saniye tespiti
+        kapak_saniyesi = 1.0
+        match_kapak = re.search(r"KAPAK_ANI_SANİYE[:\s]+([\d\.]+)", analiz_metni, re.IGNORECASE)
+        if match_kapak:
+            try:
+                kapak_saniyesi = float(match_kapak.group(1))
+            except ValueError:
+                pass
+        log_ekle(f"📸 Tespit edilen kapak anı saniyesi: {kapak_saniyesi}sn")
 
         video_icerigi = f"VİDEO ANALİZ SONUCU:\n{analiz_metni}\n\nMETİN ÜRETİM NOTLARI:\n{metin_uretim_notlari.strip() if metin_uretim_notlari.strip() else 'Ek not yok.'}"
 
@@ -278,12 +283,12 @@ if buton_tiklandi:
         response_schema = {
             "type": "OBJECT",
             "properties": {
-                "beyin_firtinasi": {"type": "STRING", "description": "Seslendirme metnini yazmadan ÖNCE buraya stratejini yaz. Videodaki görsel akışa göre 4 vuruşu nasıl eşleştireceğini ve Türk psikolojisine hangi senaryoyu sokacağını planla."},
-                "veri_kilitleme": {"type": "STRING", "description": "Video analizinden ve internet aramasından gelen tüm kesin rakamları (fiyat, beygir, 0-100 vb.) buraya listele. Metni yazarken SADECE bu rakamları kullan."},
-                "oz_elestiri": {"type": "STRING", "description": "Kendi planını kurallar.txt'ye göre denetle: Kelime sayısı aralığında mı, Loop (sonsuz döngü) var mı, yasaklı kelimeler var mı? Hata bulursan asıl metni yazarken düzelt."},
+                "beyin_firtinasi": {"type": "STRING", "description": "Seslendirme metnini yazmadan ÖNCE buraya stratejini yaz. Videodaki görsel akışa göre 4 vuruşu nasıl eşleştireceğini planla."},
+                "veri_kilitleme": {"type": "STRING", "description": "Video analizinden ve internet aramasından gelen kesin rakamları buraya listele."},
+                "oz_elestiri": {"type": "STRING", "description": "Kendi planını kurallar.txt'ye göre denetle."},
                 "seslendirme_metni": {"type": "STRING"},
                 "reels_aciklamasi": {"type": "STRING"},
-                "reels_hashtagleri": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "Reels açıklaması için 5 adet ilgili hashtag. Başlarına # işareti ekle."},
+                "reels_hashtagleri": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "Reels açıklaması için 5 adet ilgili hashtag."},
                 "kapak_basliklari": {
                     "type": "ARRAY",
                     "items": {"type": "OBJECT", "properties": {"ana": {"type": "STRING"}, "alt": {"type": "STRING"}}, "required": ["ana", "alt"]},
@@ -302,7 +307,6 @@ if buton_tiklandi:
         threads_schema = {"type": "OBJECT", "properties": {"threads_aciklamasi": {"type": "STRING"}}, "required": ["threads_aciklamasi"]}
 
         try:
-            # METIN_MODELLERI artık import edildi, sorun yok
             threads_veri, kullanilan_threads_modeli = router.metin_uret(
                 threads_icerigi,
                 threads_system_prompt,
@@ -333,6 +337,23 @@ if buton_tiklandi:
         if ses_basarili and os.path.exists(ses_dosyasi):
             st.session_state.gecici_ses_dosyalari.append(ses_dosyasi)
 
+        # OTOMATİK 4K RENDER VE SENKRONİZASYON (Süre karşılaştırma ve kapak ekleme dahil)
+        log_ekle("🎬 Otomatik 4K upscale, ses senkronizasyonu ve kapak yerleşimi başlatılıyor...")
+        output_4k_path = os.path.join(tempfile.gettempdir(), f"output_4k_{uuid.uuid4().hex[:8]}.mp4")
+        output_kapak_path = os.path.join(tempfile.gettempdir(), f"kapak_{uuid.uuid4().hex[:8]}.jpg")
+
+        render_basarili = video_ve_sesi_birlestir_4k_ve_senkronize(
+            temp_input_video,
+            ses_dosyasi,
+            kapak_saniyesi,
+            output_4k_path,
+            output_kapak_path,
+            log_ekle
+        )
+
+        final_video_yolu = output_4k_path if (render_basarili and os.path.exists(output_4k_path)) else ""
+        final_kapak_yolu = output_kapak_path if (os.path.exists(output_kapak_path)) else ""
+
         log_ekle("🏁 Tamamlandı.")
         ilerlemeyi_guncelle(4, 4, "✅ Tamamlandı!")
 
@@ -354,6 +375,9 @@ if buton_tiklandi:
             "kullanilan_metin_modeli": kullanilan_metin_modeli,
             "kullanilan_ses_modeli": kullanilan_ses_modeli,
             "kullanilan_threads_modeli": kullanilan_threads_modeli,
+            "kapak_saniyesi": kapak_saniyesi,
+            "kapak_resmi_yolu": final_kapak_yolu,
+            "final_4k_video": final_video_yolu,
         }
 
     except Exception as e:
@@ -367,6 +391,8 @@ if buton_tiklandi:
         st.session_state.sonuc = None
         ilerlemeyi_guncelle(0, 4, "❌ Hata!")
         st.error("Hata oluştu. Logu kopyalayın.")
+    finally:
+        temp_dosya_temizle(temp_input_video)
 
 # ============================================================
 # SONUÇLARI GÖSTER
@@ -384,6 +410,10 @@ if st.session_state.sonuc:
         if st.button("🗑️ Geçmiş Üretimleri Temizle", use_container_width=True):
             if sonuc.get("ses_dosyasi") and os.path.exists(sonuc["ses_dosyasi"]):
                 temp_dosya_temizle(sonuc["ses_dosyasi"])
+            if sonuc.get("final_4k_video") and os.path.exists(sonuc["final_4k_video"]):
+                temp_dosya_temizle(sonuc["final_4k_video"])
+            if sonuc.get("kapak_resmi_yolu") and os.path.exists(sonuc["kapak_resmi_yolu"]):
+                temp_dosya_temizle(sonuc["kapak_resmi_yolu"])
             for dosya in st.session_state.gecici_ses_dosyalari:
                 temp_dosya_temizle(dosya)
             st.session_state.gecici_ses_dosyalari = []
@@ -392,7 +422,41 @@ if st.session_state.sonuc:
             tum_kayitlari_sil()
             st.rerun()
 
-    st.markdown("### 🎧 Medya")
+    st.markdown("### 🎬 Hazır 4K Video & Kapak Fotoğrafı")
+    
+    col_v, col_img = st.columns([2, 1])
+    with col_v:
+        st.markdown("**📺 4K Optimize Edilmiş & Senkronize Video** (Orijinal ses kapatıldı, AI ses eklendi, boşluksuz 4K upscale yapıldı)")
+        if sonuc.get("final_4k_video") and os.path.exists(sonuc["final_4k_video"]):
+            with open(sonuc["final_4k_video"], "rb") as f:
+                vid_bytes = f.read()
+            st.video(vid_bytes)
+            st.download_button(
+                "⬇️ 4K Optimize Videoyu İndir (.mp4)",
+                vid_bytes,
+                file_name="otoxtra_4k_final.mp4",
+                mime="video/mp4"
+            )
+        else:
+            st.warning("4K video dosyası bulunamadı.")
+
+    with col_img:
+        st.markdown(f"**📸 AI Seçilen Kapak Fotoğrafı** ({sonuc.get('kapak_saniyesi', 1.0)}n)")
+        if sonuc.get("kapak_resmi_yolu") and os.path.exists(sonuc["kapak_resmi_yolu"]):
+            with open(sonuc["kapak_resmi_yolu"], "rb") as f:
+                img_bytes = f.read()
+            st.image(img_bytes, caption="En çarpıcı an (Kapak)", use_column_width=True)
+            st.download_button(
+                "⬇️ Kapak Fotoğrafını İndir (.jpg)",
+                img_bytes,
+                file_name="kapak_fotografi.jpg",
+                mime="image/jpeg"
+            )
+        else:
+            st.info("Kapak fotoğrafı oluşturulamadı.")
+
+    st.divider()
+    st.markdown("### 🎧 Medya (Ayrı Ses)")
     st.markdown(f"**🎙️ Seslendirme** (model: {sonuc.get('kullanilan_ses_modeli', '?')})")
     if sonuc["ses_basarili"] and os.path.exists(sonuc["ses_dosyasi"]):
         with open(sonuc["ses_dosyasi"], "rb") as f:
@@ -458,8 +522,8 @@ if st.session_state.sonuc:
         key="duzenlenmis_ses_metni_widget",
     )
 
-    if st.button("🔄 Bu Metinle Yeniden Ses Üret"):
-        with st.spinner("Ses üretiliyor..."):
+    if st.button("🔄 Bu Metinle Yeniden Ses ve 4K Video Üret"):
+        with st.spinner("Ses ve 4K video yeniden üretiliyor..."):
             yeni_ses_dosyasi = os.path.join(tempfile.gettempdir(), f"ses_{uuid.uuid4().hex[:8]}.wav")
             ses_basarili_yeni, kullanilan_ses_modeli_yeni = router.ses_uret(
                 duzenlenmis_ses_metni,
@@ -470,7 +534,6 @@ if st.session_state.sonuc:
             )
 
             if ses_basarili_yeni and os.path.exists(yeni_ses_dosyasi):
-                # Eski ses dosyasını temizle
                 eski_ses_dosyasi = sonuc.get("ses_dosyasi", "")
                 if eski_ses_dosyasi and os.path.exists(eski_ses_dosyasi):
                     temp_dosya_temizle(eski_ses_dosyasi)
@@ -484,7 +547,7 @@ if st.session_state.sonuc:
                     st.session_state.sonuc["kullanilan_ses_modeli"] = kullanilan_ses_modeli_yeni
                 st.session_state.gecici_ses_dosyalari.append(yeni_ses_dosyasi)
 
-                log_ekle("✅ Yeni ses başarıyla üretildi, player güncellendi.")
+                log_ekle("✅ Yeni ses ve 4K video başarıyla güncellendi.")
                 st.rerun()
             else:
                 st.error("❌ Ses üretilemedi. Logları kontrol edin.")
