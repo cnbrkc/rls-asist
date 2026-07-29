@@ -29,7 +29,7 @@ MAX_INPUT_KARAKTER = 900_000
 KAYIT_DOSYASI = "kayitlar.json"
 MAX_KAYIT = 5
 SES_OMRU_SANIYE = 24 * 60 * 60  # 24 saat
-SES_HIZ_CARpanI = 1.0
+SES_HIZ_CARpanI = 1.2
 
 TURKCE_AYLAR = {
     1: "Ocak", 2: "Şubat", 3: "Mart", 4: "Nisan",
