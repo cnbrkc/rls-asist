@@ -190,9 +190,9 @@ def _ses_suresini_al(ses_yolu: str) -> float:
         pass
     return 0.0
 
-# ===== VİDEO + SES BİRLEŞTİRME (HAFİF UPSCALE + KESKİNLEŞTİRME + YAVAŞLATMA) =====
+# ===== VİDEO + SES BİRLEŞTİRME (2K UPSCALE + KESKİNLEŞTİRME + YAVAŞLATMA) =====
 def video_ve_sesi_birlestir(video_yolu: str, ses_yolu: str, cikti_v_yolu: str, log_ekle) -> bool:
-    """Videoya AI sesini ekle + hafif upscale + sese uyum için video yavaşlatma (KESME YOK)"""
+    """Videoya AI sesini ekle + 2K upscale + sese uyum için video yavaşlatma (KESME YOK)"""
 
     # Video çözünürlüğünü tespit et
     genislik, yukseklik = 1920, 1080
@@ -211,13 +211,13 @@ def video_ve_sesi_birlestir(video_yolu: str, ses_yolu: str, cikti_v_yolu: str, l
     ses_sure = _ses_suresini_al(ses_yolu)
     log_ekle(f"⏱️ Video: {video_sure:.1f}s | Ses: {ses_sure:.1f}s")
 
-    # Hedef: hafif upscale (1080p→1440p, 720p→1080p, zaten yüksekse sadece keskinleştir)
-    if yukseklik < 1080:
-        hedef_y = 1080
-    elif yukseklik < 1440:
-        hedef_y = 1440
+    # Hedef: 2K upscale (1440p) — zaten 2K+ ise sadece keskinleştir
+    # 2K = 1440p → 4K'dan 2.25x hızlı, 2.30 dk videolar için güvenli
+    HEDEF_2K_Y = 1440
+    if yukseklik >= HEDEF_2K_Y:
+        hedef_y = yukseklik  # Zaten 2K+, sadece keskinleştir
     else:
-        hedef_y = yukseklik  # Zaten iyi, sadece keskinleştir
+        hedef_y = HEDEF_2K_Y
 
     hedef_x = int(genislik * hedef_y / yukseklik)
     hedef_x += hedef_x % 2   # ffmpeg çift sayı ister
@@ -229,10 +229,10 @@ def video_ve_sesi_birlestir(video_yolu: str, ses_yolu: str, cikti_v_yolu: str, l
     # Upscale
     if hedef_y != yukseklik:
         vf_parcalari.append(f"scale={hedef_x}:{hedef_y}:flags=lanczos")
-        log_ekle(f"🎬 Hafif upscale: {genislik}x{yukseklik} → {hedef_x}x{hedef_y}")
+        log_ekle(f"🎬 2K Upscale: {genislik}x{yukseklik} → {hedef_x}x{hedef_y}")
 
-    # Keskinleştirme
-    vf_parcalari.append("unsharp=5:5:0.8:3:3:0.0")
+    # Keskinleştirme (4K upscale sonrası detayları netleştir)
+    vf_parcalari.append("unsharp=5:5:1.0:3:3:0.0")
 
     # Video yavaşlatma: ses video'dan uzunsa videoyu yavaşlat (max 0.9x)
     video_yavaslatma = 1.0  # 1.0 = yavaşlatma yok
@@ -290,7 +290,7 @@ def video_ve_sesi_birlestir(video_yolu: str, ses_yolu: str, cikti_v_yolu: str, l
                 return False
             log_ekle("✅ Video + ses birleştirildi (fallback: orijinal çözünürlük)")
             return True
-        log_ekle("✅ Video ve ses başarıyla birleştirildi (hafif upscale + yavaşlatma)!")
+        log_ekle("✅ Video ve ses başarıyla birleştirildi (2K upscale + keskinleştirme)!")
         return True
     except FileNotFoundError:
         log_ekle("⚠️ ffmpeg bulunamadı!")
