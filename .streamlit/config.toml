@@ -3,3 +3,4 @@ magicEnabled = true
 
 [server]
 maxUploadSize = 50
+enableStaticServing = true
