@@ -29,7 +29,7 @@ MAX_INPUT_KARAKTER = 900_000
 KAYIT_DOSYASI = "kayitlar.json"
 MAX_KAYIT = 5
 SES_OMRU_SANIYE = 24 * 60 * 60  # 24 saat
-SES_HIZ_CARpanI = 1.2   # Dikkat: orijinal kodda büyük 'I' ile yazılmış
+SES_HIZ_CARpanI = 1.0
 
 TURKCE_AYLAR = {
     1: "Ocak", 2: "Şubat", 3: "Mart", 4: "Nisan",
@@ -37,7 +37,6 @@ TURKCE_AYLAR = {
     9: "Eylül", 10: "Ekim", 11: "Kasım", 12: "Aralık",
 }
 
-# ===== YARDIMCI FONKSİYON (config içinde kullanılacak) =====
 def guncel_tarih_metni() -> str:
     simdi = datetime.now()
     return f"{simdi.day} {TURKCE_AYLAR[simdi.month]} {simdi.year}"
