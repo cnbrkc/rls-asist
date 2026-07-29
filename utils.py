@@ -13,7 +13,7 @@ import streamlit as st
 
 from config import (
     KAYIT_DOSYASI, MAX_KAYIT, SES_OMRU_SANIYE,
-    TURKCE_AYLAR, SES_HIZ_CARpanI,  # hız çarpanı burada da kullanılabilir
+    TURKCE_AYLAR, SES_HIZ_CARpanI,
 )
 
 # ===== TARİH =====
@@ -127,6 +127,129 @@ def sesi_hizlandir(giris_dosyasi: str, cikti_dosyasi: str, hiz_carpani: float, l
         return False
     except Exception as e:
         log_ekle(f"⚠️ ffmpeg beklenmeyen hata: {e}")
+        return False
+
+# ===== VİDEO SÜRE TESPİTİ VE İŞLEME =====
+def video_suresini_al(video_yolu: str) -> float:
+    komut = [
+        "ffprobe", "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        video_yolu
+    ]
+    try:
+        sonuc = subprocess.run(komut, capture_output=True, text=True, timeout=15)
+        if sonuc.returncode == 0 and sonuc.stdout.strip():
+            return float(sonuc.stdout.strip())
+    except Exception:
+        pass
+    return 30.0
+
+def kapak_fotografi_cikar(video_yolu: str, saniye: float, cikti_resim_yolu: str, log_ekle) -> bool:
+    komut = [
+        "ffmpeg", "-y",
+        "-ss", str(saniye),
+        "-i", video_yolu,
+        "-vframes", "1",
+        "-q:v", "2",
+        cikti_resim_yolu
+    ]
+    try:
+        sonuc = subprocess.run(komut, capture_output=True, text=True, timeout=30)
+        return sonuc.returncode == 0 and os.path.exists(cikti_resim_yolu)
+    except Exception as e:
+        log_ekle(f"⚠️ Kapak fotoğrafı çıkarılamadı: {e}")
+        return False
+
+def video_ve_sesi_birlestir_4k_ve_senkronize(
+    video_yolu: str,
+    ses_yolu: str,
+    kapak_saniyesi: float,
+    cikti_v_yolu: str,
+    cikti_kapak_yolu: str,
+    log_ekle
+) -> bool:
+    try:
+        log_ekle(f"📸 En çarpıcı kapak anı ({kapak_saniyesi}n) fotoğrafa dönüştürülüyor...")
+        kapak_fotografi_cikar(video_yolu, kapak_saniyesi, cikti_kapak_yolu, log_ekle)
+
+        video_sure = video_suresini_al(video_yolu)
+        with wave.open(ses_yolu, "rb") as wf:
+            frames = wf.getnframes()
+            rate = wf.getframerate()
+            audio_sure = frames / rate
+
+        log_ekle(f"⏱️ Video süresi: {video_sure:.2f}sn | Ses süresi: {audio_sure:.2f}sn")
+
+        # Ses uzunsa video yavaşlatılarak sese eşitlenir
+        hiz_orani = audio_sure / video_sure if video_sure > 0 else 1.0
+
+        intro_yolu = os.path.join(tempfile.gettempdir(), f"intro_{uuid.uuid4().hex[:8]}.mp4")
+        vars_kapak = cikti_kapak_yolu if os.path.exists(cikti_kapak_yolu) else None
+        
+        has_intro = False
+        if vars_kapak:
+            intro_komut = [
+                "ffmpeg", "-y",
+                "-loop", "1",
+                "-i", vars_kapak,
+                "-t", "0.5",
+                "-c:v", "libx264",
+                "-pix_fmt", "yuv420p",
+                "-r", "30",
+                intro_yolu
+            ]
+            res_intro = subprocess.run(intro_komut, capture_output=True, text=True, timeout=30)
+            if res_intro.returncode == 0 and os.path.exists(intro_yolu):
+                has_intro = True
+
+        if has_intro:
+            filter_str = f"[0:v]scale=2160:3840:force_original_aspect_ratio=increase,crop=2160:3840,setsar=1[v0];" \
+                         f"[1:v]scale=2160:3840:force_original_aspect_ratio=increase,crop=2160:3840,setsar=1[v1];" \
+                         f"[v0][v1]concat=n=2:v=1:a=0[vcat];" \
+                         f"[vcat]setpts=PTS*{hiz_orani}[vfin]"
+            komut = [
+                "ffmpeg", "-y",
+                "-i", intro_yolu,
+                "-i", video_yolu,
+                "-i", ses_yolu,
+                "-filter_complex", filter_str,
+                "-map", "[vfin]",
+                "-map", "2:a:0",
+                "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+                "-c:a", "aac", "-b:a", "192k",
+                "-shortest",
+                cikti_v_yolu
+            ]
+        else:
+            filter_str = f"[0:v]scale=2160:3840:force_original_aspect_ratio=increase,crop=2160:3840,setsar=1,setpts=PTS*{hiz_orani}[vfin]"
+            komut = [
+                "ffmpeg", "-y",
+                "-i", video_yolu,
+                "-i", ses_yolu,
+                "-filter_complex", filter_str,
+                "-map", "[vfin]",
+                "-map", "1:a:0",
+                "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+                "-c:a", "aac", "-b:a", "192k",
+                "-shortest",
+                cikti_v_yolu
+            ]
+
+        log_ekle("🎬 4K Upscale (boşluksuz, kırpmalı), süre senkronizasyonu ve ses birleştirme yapılıyor...")
+        proje = subprocess.run(komut, capture_output=True, text=True, timeout=600)
+        
+        temp_dosya_temizle(intro_yolu)
+
+        if proje.returncode != 0:
+            log_ekle(f"⚠️ FFmpeg 4K render hata: {proje.stderr[-400:] if proje.stderr else 'bilinmeyen'}")
+            return False
+        
+        log_ekle("✅ 4K Video, kapak fotoğrafı ve ses senkronizasyonu başarıyla tamamlandı!")
+        return True
+    except Exception as e:
+        log_ekle(f"⚠️ 4K render beklenmeyen hata: {e}")
         return False
 
 # ===== KAYIT YÖNETİMİ =====
