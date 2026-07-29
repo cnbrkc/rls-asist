@@ -316,7 +316,7 @@ def sistem_talimati_olustur(sure_saniye: int, icerik_tonu: str) -> str:
     elif "Bilgi Ağırlıklı" in icerik_tonu:
         bilgi_orani = "Her 4 cümleden 3'ü TEKNİK BİLGİ, 1'i SAMİMİ YORUM. Rakam, karşılaştırma, teknik detay, performans verisi ağırlıklı. Eğlence sadece nefes aldırmak için."
     elif "Teknik Odaklı" in icerik_tonu:
-        bilgi_orani = "Her 10 cümleden 9'u TEKNİK BİLGİ, 1'i SAMİMİ YORUM. Neredeyse her cümle veri/rakam/karşılaştırma içermeli. Eğlence minimum, bilgi maksimum."
+        bilgi_orani = "Her 10 cümlerden 9'u TEKNİK BİLGİ, 1'i SAMİMİ YORUM. Neredeyse her cümle veri/rakam/karşılaştırma içermeli. Eğlence minimum, bilgi maksimum."
     else:
         bilgi_orani = "Her 2 cümleden 1'i TEKNİK BİLGİ, 1'i SAMİMİ YORUM. Bilgi ve eğlence dengeli dağılım. Ne çok sıkıcı ne de çok boş."
 
