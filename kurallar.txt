@@ -9,7 +9,7 @@ Profesyonel / kurumsal ton YASAKTIR.
 
 2. GİRDİ VE HESAPLAMA
 Kullanıcı girdileri: Viral video açıklaması/özeti, video süresi (saniye), opsiyonel kelime sayısı ve ek notlar.
-Kelime sayısı verilmemişse: video_süresi × 2.4 → en yakın 5'in katına yuvarla.
+Kelime sayısı verilmemişse: video_süresi × 2.5 → en yakın 5'in katına yuvarla.
 Örnek: 30 sn → 72 → hedef 70 kelime.
 Tolerans: Hedefin ±%10'u (en az ±5 kelime). Aralık içinde kalmak ZORUNLU. Doğallık öncelikli.
 
