@@ -177,14 +177,48 @@ def video_suresini_al(video_yolu: str) -> float:
         pass
     return 30.0
 
-# ===== VİDEO + SES BİRLEŞTİRME (BASİT — 4K YOK, KAPAK YOK) =====
+# ===== VİDEO + SES BİRLEŞTİRME (HAFİF UPSCALE + KESKİNLEŞTİRME) =====
 def video_ve_sesi_birlestir(video_yolu: str, ses_yolu: str, cikti_v_yolu: str, log_ekle) -> bool:
-    """Videoya AI sesini ekle (4K upscale yok, kapak yok — sadece ses + video birleştirme)"""
+    """Videoya AI sesini ekle + hafif upscale dokunuşu (4K değil, kalite artırımı)"""
+
+    # Video çözünürlüğünü tespit et
+    genislik, yukseklik = 1920, 1080
+    try:
+        import cv2
+        cap = cv2.VideoCapture(video_yolu)
+        if cap.isOpened():
+            genislik = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            yukseklik = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            cap.release()
+    except Exception:
+        pass
+
+    # Hedef: hafif upscale (1080p→1440p, 720p→1080p, zaten yüksekse sadece keskinleştir)
+    if yukseklik < 1080:
+        hedef_y = 1080
+    elif yukseklik < 1440:
+        hedef_y = 1440
+    else:
+        hedef_y = yukseklik  # Zaten iyi, sadece keskinleştir
+
+    hedef_x = int(genislik * hedef_y / yukseklik)
+    hedef_x += hedef_x % 2   # ffmpeg çift sayı ister
+    hedef_y += hedef_y % 2
+
+    # Video filtresi: upscale + keskinleştirme
+    if hedef_y != yukseklik:
+        vf_filtre = f"scale={hedef_x}:{hedef_y}:flags=lanczos,unsharp=5:5:0.8:3:3:0.0"
+        log_ekle(f"🎬 Hafif upscale: {genislik}x{yukseklik} → {hedef_x}x{hedef_y} (lanczos + keskinleştirme)")
+    else:
+        vf_filtre = "unsharp=5:5:0.8:3:3:0.0"
+        log_ekle(f"🎬 Video keskinleştiriliyor: {genislik}x{yukseklik} (upscale gereksizdi)")
+
     komut = [
         FFMPEG_BIN, "-y",
         "-i", video_yolu,
         "-i", ses_yolu,
-        "-c:v", "copy",
+        "-vf", vf_filtre,
+        "-c:v", "libx264", "-preset", "fast", "-crf", "23",
         "-c:a", "aac", "-b:a", "192k",
         "-shortest",
         "-map", "0:v:0",
@@ -192,12 +226,29 @@ def video_ve_sesi_birlestir(video_yolu: str, ses_yolu: str, cikti_v_yolu: str, l
         cikti_v_yolu
     ]
     try:
-        log_ekle("🎬 Videoya AI sesi ekleniyor (4K upscale kapalı, orijinal çözünürlük)...")
         sonuc = subprocess.run(komut, capture_output=True, text=True, timeout=300)
         if sonuc.returncode != 0:
             log_ekle(f"⚠️ ffmpeg hata: {sonuc.stderr[-300:] if sonuc.stderr else 'bilinmeyen'}")
-            return False
-        log_ekle("✅ Video ve ses başarıyla birleştirildi!")
+            # Fallback: upscale olmadan tekrar dene
+            log_ekle("🔄 Fallback: upscale olmadan tekrar deneniyor...")
+            fallback_komut = [
+                FFMPEG_BIN, "-y",
+                "-i", video_yolu,
+                "-i", ses_yolu,
+                "-c:v", "copy",
+                "-c:a", "aac", "-b:a", "192k",
+                "-shortest",
+                "-map", "0:v:0",
+                "-map", "1:a:0",
+                cikti_v_yolu
+            ]
+            fallback_sonuc = subprocess.run(fallback_komut, capture_output=True, text=True, timeout=300)
+            if fallback_sonuc.returncode != 0:
+                log_ekle(f"⚠️ Fallback ffmpeg hata: {fallback_sonuc.stderr[-300:] if fallback_sonuc.stderr else 'bilinmeyen'}")
+                return False
+            log_ekle("✅ Video + ses birleştirildi (fallback: orijinal çözünürlük)")
+            return True
+        log_ekle("✅ Video ve ses başarıyla birleştirildi (hafif upscale + keskinleştirme)!")
         return True
     except FileNotFoundError:
         log_ekle("⚠️ ffmpeg bulunamadı!")
