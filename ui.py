@@ -46,11 +46,14 @@ if "log_satirlari" not in st.session_state:
     st.session_state.log_satirlari = []
 if "gecici_ses_dosyalari" not in st.session_state:
     st.session_state.gecici_ses_dosyalari = []
-
 if "video_analiz_notlari" not in st.session_state:
     st.session_state.video_analiz_notlari = ""
 if "metin_uretim_notlari" not in st.session_state:
     st.session_state.metin_uretim_notlari = ""
+if "icerik_tonu" not in st.session_state:
+    st.session_state.icerik_tonu = "⚖️ Dengeli (%50 bilgi)"
+if "blacklist" not in st.session_state:
+    st.session_state.blacklist = {}
 
 router = SmartRouter()
 eski_ses_dosyalarini_temizle()
@@ -78,7 +81,7 @@ with st.sidebar:
     for mail in API_KEYS.keys():
         st.caption(f"• {mail}")
 
-    if st.session_state.blacklist:
+    if st.session_state.get("blacklist"):
         st.markdown("**🚫 Banlar**")
         now = time.time()
         aktif_ban = {k: v for k, v in st.session_state.blacklist.items() if v > now}
@@ -139,10 +142,30 @@ uploaded_video = st.file_uploader(
 )
 video_buyuk = uploaded_video is not None and uploaded_video.size > 50 * 1024 * 1024
 
+sure_saniye = 30  # Varsayılan
+
 if uploaded_video is not None:
     st.video(uploaded_video)
     if video_buyuk:
         st.warning("⚠️ Video 50 MB üstü! Sıkıştırmanız önerilir.")
+
+    # Hızlı süre tespiti
+    temp_check_path = os.path.join(tempfile.gettempdir(), f"check_{uuid.uuid4().hex[:8]}.mp4")
+    try:
+        with open(temp_check_path, "wb") as f:
+            f.write(uploaded_video.getvalue())
+        detected = video_suresini_al(temp_check_path)
+    except Exception:
+        detected = 0.0
+    finally:
+        temp_dosya_temizle(temp_check_path)
+
+    if detected >= 1.0:
+        sure_saniye = int(round(detected))
+        st.success(f"⏱️ Otomatik tespit edilen video süresi: {sure_saniye} saniye")
+    else:
+        st.warning("⚠️ Videonun süresi otomatik okunamadı! Lütfen videonun süresini saniye cinsinden belirtin:")
+        sure_saniye = int(st.number_input("⏱️ Manuel Süre Girişi (sn)", min_value=1, max_value=300, value=30, step=1, key="manual_sure_input"))
 
 c1, c2 = st.columns(2)
 with c1:
@@ -163,8 +186,8 @@ with c2:
 icerik_tonu = st.radio(
     "🎯 İçerik Tonu",
     ["🎭 Eğlence Ağırlıklı (%25 bilgi)", "⚖️ Dengeli (%50 bilgi)", "🧠 Bilgi Ağırlıklı (%75 bilgi)", "📊 Teknik Odaklı (%90 bilgi)"],
-    index=1,
-    horizontal=True
+    horizontal=True,
+    key="icerik_tonu"
 )
 
 buton_tiklandi = st.button("🚀 ÜRET VE 4K HAZIRLA!", disabled=uploaded_video is None, use_container_width=True)
@@ -205,11 +228,7 @@ if buton_tiklandi and uploaded_video is not None:
         f.write(uploaded_video.getvalue())
 
     try:
-        # OTOMATİK SÜRE TESPİTİ
-        sure_saniye = int(round(video_suresini_al(temp_input_video)))
-        if sure_saniye < 1:
-            sure_saniye = 30  # Güvenli fallback
-        log_ekle(f"⏱️ Video süresi: {sure_saniye} saniye")
+        log_ekle(f"⏱️ İşlenen video süresi: {sure_saniye} saniye")
 
         # ADIM 1: Video Analiz
         ilerlemeyi_guncelle(1, 4, "🎥 Video analiz ediliyor (Kapak anı tespit ediliyor)...")
@@ -306,7 +325,7 @@ if buton_tiklandi and uploaded_video is not None:
         if ses_basarili and os.path.exists(ses_dosyasi):
             st.session_state.gecici_ses_dosyalari.append(ses_dosyasi)
 
-        # OTOMATİK 4K RENDER VE SENKRONİZASYON
+        # OTOMATİK 4K RENDER VE SENKRONİZASYON (Süre karşılaştırma ve kapak ekleme dahil)
         log_ekle("🎬 Otomatik 4K upscale, ses senkronizasyonu ve kapak yerleşimi başlatılıyor...")
         output_4k_path = os.path.join(tempfile.gettempdir(), f"output_4k_{uuid.uuid4().hex[:8]}.mp4")
         output_kapak_path = os.path.join(tempfile.gettempdir(), f"kapak_{uuid.uuid4().hex[:8]}.jpg")
@@ -438,7 +457,7 @@ if st.session_state.sonuc:
         )
     else:
         if kullanilan_metin_modeli == "geçmiş":
-            st.info("📝 Bu geçmiş bir kayıt. Ses dosyası artık mevcut değil.")
+            st.info("📝 Ayrıntılı geçmiş kayıt. Ses dosyası artık mevcut değil.")
         else:
             st.warning("Ses dosyası bulunamadı.")
 
@@ -518,6 +537,6 @@ if st.session_state.sonuc:
                 log_ekle("✅ Yeni ses ve 4K video başarıyla güncellendi.")
                 st.rerun()
             else:
-                log_ekle("❌ Ses üretilemedi.")
+                st.error("❌ Ses üretilemedi. Logları kontrol edin.")
                 if os.path.exists(yeni_ses_dosyasi):
                     temp_dosya_temizle(yeni_ses_dosyasi)
