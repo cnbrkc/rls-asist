@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import time
 import os
 import uuid
@@ -32,6 +33,11 @@ st.markdown("""
     .gecmis-item { padding: 8px; margin: 4px 0; border-radius: 6px; cursor: pointer; }
     .gecmis-item:hover { background-color: #f0f0f0; }
 </style>
+<link rel="manifest" href="/app/static/manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="otoXtra">
+<meta name="theme-color" content="#ff4b4b">
 """, unsafe_allow_html=True)
 
 st.markdown("### 🏎️ otoXtra")
@@ -217,6 +223,33 @@ gunlugu_ciz()
 # ÜRETİM AKIŞI
 # ============================================================
 if buton_tiklandi and uploaded_video is not None:
+    # Wake Lock + beforeunload: İşlem sırasında ekranı açık tut, sayfadan ayrılma uyarısı
+    components.html("""
+    <script>
+    // Wake Lock API (ekranı açık tutar)
+    window._otoxtra_wakeLock = null;
+    async function requestWakeLock() {
+        try {
+            if ('wakeLock' in navigator) {
+                window._otoxtra_wakeLock = await navigator.wakeLock.request('screen');
+                console.log('otoXtra: Wake Lock aktif');
+            }
+        } catch(e) { console.log('otoXtra: Wake Lock hatası:', e); }
+    }
+    requestWakeLock();
+
+    // beforeunload: Sayfadan ayrılmak isteyince uyarı
+    window._otoxtra_beforeunload = function(e) {
+        e.preventDefault();
+        e.returnValue = 'otoXtra üretim devam ediyor! Çıkmak istediğinize emin misiniz?';
+        return e.returnValue;
+    };
+    window.addEventListener('beforeunload', window._otoxtra_beforeunload);
+    </script>
+    """, height=0)
+
+    st.warning("⚡ **Üretim devam ediyor — bu sayfadan ayrılmayın!** Ekran açık kalacak.", icon="⚠️")
+
     st.session_state.log_satirlari = []
     log_ekle("🚀 Üretim başladı...")
     ilerlemeyi_guncelle(0, 4, "Başlatılıyor...")
@@ -324,6 +357,20 @@ if buton_tiklandi and uploaded_video is not None:
 
         log_ekle("🏁 Tamamlandı.")
         ilerlemeyi_guncelle(4, 4, "✅ Tamamlandı!")
+
+        # Wake Lock + beforeunload serbest bırak
+        components.html("""
+        <script>
+        if (window._otoxtra_wakeLock) {
+            window._otoxtra_wakeLock.release();
+            window._otoxtra_wakeLock = null;
+        }
+        if (window._otoxtra_beforeunload) {
+            window.removeEventListener('beforeunload', window._otoxtra_beforeunload);
+            window._otoxtra_beforeunload = null;
+        }
+        </script>
+        """, height=0)
 
         kayit_ekle({
             "seslendirme_metni": veri.get("seslendirme_metni", ""),
