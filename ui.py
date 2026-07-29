@@ -46,12 +46,10 @@ if "log_satirlari" not in st.session_state:
     st.session_state.log_satirlari = []
 if "gecici_ses_dosyalari" not in st.session_state:
     st.session_state.gecici_ses_dosyalari = []
-if "video_analiz_notlari" not in st.session_state:
-    st.session_state.video_analiz_notlari = ""
-if "metin_uretim_notlari" not in st.session_state:
-    st.session_state.metin_uretim_notlari = ""
-if "icerik_tonu" not in st.session_state:
-    st.session_state.icerik_tonu = "⚖️ Dengeli (%50 bilgi)"
+if "_sonuc_versiyon" not in st.session_state:
+    st.session_state._sonuc_versiyon = 0
+if "_sonuc_versiyon_last" not in st.session_state:
+    st.session_state._sonuc_versiyon_last = -1
 if "blacklist" not in st.session_state:
     st.session_state.blacklist = {}
 
@@ -123,6 +121,7 @@ with st.sidebar:
                     "kapak_resmi_yolu": "",
                     "final_4k_video": ""
                 }
+                st.session_state._sonuc_versiyon += 1
                 st.rerun()
     else:
         st.caption("Henüz kayıt yok")
@@ -186,6 +185,7 @@ with c2:
 icerik_tonu = st.radio(
     "🎯 İçerik Tonu",
     ["🎭 Eğlence Ağırlıklı (%25 bilgi)", "⚖️ Dengeli (%50 bilgi)", "🧠 Bilgi Ağırlıklı (%75 bilgi)", "📊 Teknik Odaklı (%90 bilgi)"],
+    index=1,
     horizontal=True,
     key="icerik_tonu"
 )
@@ -367,6 +367,7 @@ if buton_tiklandi and uploaded_video is not None:
             "kapak_resmi_yolu": final_kapak_yolu,
             "final_4k_video": final_video_yolu,
         }
+        st.session_state._sonuc_versiyon += 1
 
     except Exception as e:
         if "StopException" in type(e).__name__ or "RerunException" in type(e).__name__ or "StopExecution" in str(type(e)):
@@ -406,6 +407,7 @@ if st.session_state.sonuc:
             st.session_state.gecici_ses_dosyalari = []
             st.session_state.sonuc = None
             st.session_state.log_satirlari = []
+            st.session_state._sonuc_versiyon += 1
             tum_kayitlari_sil()
             st.rerun()
 
@@ -501,9 +503,16 @@ if st.session_state.sonuc:
     st.markdown("### 🎙️ Seslendirme Metni")
     st.caption("TTS için üretilen metin. Düzenleyip yeniden ses üretebilirsiniz.")
 
+    # Sonuç değiştiyse (yeni üretim veya geçmiş tıklama) widget key'i temizle
+    if st.session_state._sonuc_versiyon != st.session_state._sonuc_versiyon_last:
+        st.session_state._sonuc_versiyon_last = st.session_state._sonuc_versiyon
+        if "duzenlenmis_ses_metni_widget" in st.session_state:
+            del st.session_state["duzenlenmis_ses_metni_widget"]
+
+    # value parametresi: key yoksa AI metnini, varsa session_state'teki kullanıcı düzenlemesini kullan
     duzenlenmis_ses_metni = st.text_area(
         "Seslendirme Metni",
-        value=veri.get("seslendirme_metni", ""),
+        value=st.session_state.get("duzenlenmis_ses_metni_widget", veri.get("seslendirme_metni", "")),
         height=300,
         label_visibility="collapsed",
         key="duzenlenmis_ses_metni_widget",
