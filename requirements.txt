@@ -1,4 +1,5 @@
-streamlit
+streamlit>=1.30.0
 google-genai
 opencv-python
-numpy
+numpy>=1.24.0
+pandas>=2.0.0
