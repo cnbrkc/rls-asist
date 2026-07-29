@@ -1,5 +1,4 @@
 import streamlit as st
-import streamlit.components.v1 as components
 import time
 import os
 import uuid
@@ -209,12 +208,7 @@ if buton_tiklandi and uploaded_video is not None:
         # OTOMATİK SÜRE TESPİTİ
         sure_saniye = int(round(video_suresini_al(temp_input_video)))
         if sure_saniye < 1:
-            st.warning("⚠️ Videonun süresi otomatik okunamadı! Lütfen videonun süresini (saniye cinsinden) aşağıya girin:")
-            manual_sure = st.number_input("⏱️ Manuel Süre Girişi (sn)", min_value=1, max_value=300, value=30, step=1, key="manual_sure_input")
-            if st.button("Devam Et", key="manual_sure_btn"):
-                sure_saniye = int(manual_sure)
-            else:
-                st.stop()
+            sure_saniye = 30  # Güvenli fallback
         log_ekle(f"⏱️ Video süresi: {sure_saniye} saniye")
 
         # ADIM 1: Video Analiz
@@ -241,7 +235,7 @@ if buton_tiklandi and uploaded_video is not None:
         if kapak_saniyesi <= 0.2:
             kapak_saniyesi = min(2.0, max(0.5, sure_saniye / 4.0))
 
-        log_ekle(f"📸 Tespit edilen kapak anı saniyesi: {kapak_saniyesi}sn")
+        log_ekle(f"📸 Tespit edilen kapak anı saniyesi: {kapak_saniyesi:.1f}sn")
 
         video_icerigi = f"VİDEO ANALİZ SONUCU:\n{analiz_metni}\n\nMETİN ÜRETİM NOTLARI:\n{metin_uretim_notlari.strip() if metin_uretim_notlari.strip() else 'Ek not yok.'}"
 
@@ -415,7 +409,7 @@ if st.session_state.sonuc:
             st.warning("4K video dosyası bulunamadı.")
 
     with col_img:
-        st.markdown(f"**📸 AI Seçilen Kapak Fotoğrafı** ({sonuc.get('kapak_saniyesi', 1.0)}n)")
+        st.markdown(f"**📸 AI Seçilen Kapak Fotoğrafı** ({sonuc.get('kapak_saniyesi', 1.0):.1f}n)")
         if sonuc.get("kapak_resmi_yolu") and os.path.exists(sonuc["kapak_resmi_yolu"]):
             with open(sonuc["kapak_resmi_yolu"], "rb") as f:
                 img_bytes = f.read()
