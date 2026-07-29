@@ -24,7 +24,9 @@ def guncel_tarih_metni() -> str:
 # ===== PROMPT DOSYASI OKUMA =====
 def prompt_dosyasini_oku(dosya_adi: str) -> str:
     try:
-        with open(dosya_adi, "r", encoding="utf-8") as f:
+        # Dosya yolunu projenin kendi dizinine göre çöz (Streamlit Cloud uyumlu)
+        tam_yol = os.path.join(os.path.dirname(os.path.abspath(__file__)), dosya_adi)
+        with open(tam_yol, "r", encoding="utf-8") as f:
             return f.read()
     except FileNotFoundError:
         st.error(f"⚠️ Prompt dosyası bulunamadı: '{dosya_adi}'!")
@@ -107,9 +109,26 @@ def sesi_hizlandir(giris_dosyasi: str, cikti_dosyasi: str, hiz_carpani: float, l
         except Exception as e:
             log_ekle(f"⚠️ Ses kopyalanamadı: {e}")
             return False
+    # ffmpeg atempo filtresi sadece 0.5–2.0 arası değerleri kabul eder
+    # Sınırların dışındaki değerler için zincirleme atempo uygula
+    if hiz_carpani < 0.5 or hiz_carpani > 2.0:
+        log_ekle(f"⚠️ atempo={hiz_carpani} ffmpeg sınırı dışında (0.5-2.0), zincirleme filtre uygulanıyor...")
+        carpanlar = []
+        kalan = hiz_carpani
+        while kalan > 2.0:
+            carpanlar.append(2.0)
+            kalan /= 2.0
+        while kalan < 0.5:
+            carpanlar.append(0.5)
+            kalan /= 0.5
+        carpanlar.append(round(kalan, 4))
+        atempo_str = ",".join(f"atempo={c}" for c in carpanlar)
+    else:
+        atempo_str = f"atempo={hiz_carpani}"
+
     komut = [
         "ffmpeg", "-y", "-i", giris_dosyasi,
-        "-filter:a", f"atempo={hiz_carpani}",
+        "-filter:a", atempo_str,
         "-ar", "24000", "-ac", "1", "-sample_fmt", "s16",
         cikti_dosyasi
     ]
