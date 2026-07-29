@@ -129,9 +129,8 @@ def sesi_hizlandir(giris_dosyasi: str, cikti_dosyasi: str, hiz_carpani: float, l
         log_ekle(f"⚠️ ffmpeg beklenmeyen hata: {e}")
         return False
 
-# ===== VİDEO SÜRE TESPİTİ VE İŞLEME =====
+# ===== VİDEO SÜRE TESPİTİ VE İŞLEME (OPENCV HIZLI) =====
 def video_suresini_al(video_yolu: str) -> float:
-    # 1. Yöntem: OpenCV ile çok hızlı süre okuma (0.01 saniye sürer)
     try:
         import cv2
         cap = cv2.VideoCapture(video_yolu)
@@ -146,7 +145,6 @@ def video_suresini_al(video_yolu: str) -> float:
     except Exception:
         pass
 
-    # 2. Yöntem: ffprobe ile okuma
     komut = [
         "ffprobe", "-v", "error",
         "-select_streams", "v:0",
@@ -155,7 +153,7 @@ def video_suresini_al(video_yolu: str) -> float:
         video_yolu
     ]
     try:
-        sonuc = subprocess.run(komut, capture_output=True, text=True, timeout=3)
+        sonuc = subprocess.run(komut, capture_output=True, text=True, timeout=5)
         if sonuc.returncode == 0 and sonuc.stdout.strip():
             val = float(sonuc.stdout.strip())
             if val > 0:
@@ -163,7 +161,7 @@ def video_suresini_al(video_yolu: str) -> float:
     except Exception:
         pass
 
-    return 0.0
+    return 30.0
 
 def kapak_fotografi_cikar(video_yolu: str, saniye: float, cikti_resim_yolu: str, log_ekle) -> bool:
     komut = [
@@ -175,7 +173,7 @@ def kapak_fotografi_cikar(video_yolu: str, saniye: float, cikti_resim_yolu: str,
         cikti_resim_yolu
     ]
     try:
-        sonuc = subprocess.run(komut, capture_output=True, text=True, timeout=30)
+        sonuc = subprocess.run(komut, capture_output=True, text=True, timeout=20)
         return sonuc.returncode == 0 and os.path.exists(cikti_resim_yolu)
     except Exception as e:
         log_ekle(f"⚠️ Kapak fotoğrafı çıkarılamadı: {e}")
@@ -190,7 +188,7 @@ def video_ve_sesi_birlestir_4k_ve_senkronize(
     log_ekle
 ) -> bool:
     try:
-        log_ekle(f"📸 En çarpıcı kapak anı ({kapak_saniyesi}n) fotoğrafa dönüştürülüyor...")
+        log_ekle(f"📸 En çarpıcı kapak anı ({kapak_saniyesi:.1f}n) fotoğrafa dönüştürülüyor...")
         kapak_fotografi_cikar(video_yolu, kapak_saniyesi, cikti_kapak_yolu, log_ekle)
 
         video_sure = video_suresini_al(video_yolu)
@@ -201,7 +199,6 @@ def video_ve_sesi_birlestir_4k_ve_senkronize(
 
         log_ekle(f"⏱️ Video süresi: {video_sure:.2f}sn | Ses süresi: {audio_sure:.2f}sn")
 
-        # Ses uzunsa video yavaşlatılarak sese eşitlenir
         hiz_orani = audio_sure / video_sure if video_sure > 0 else 1.0
 
         intro_yolu = os.path.join(tempfile.gettempdir(), f"intro_{uuid.uuid4().hex[:8]}.mp4")
@@ -219,7 +216,7 @@ def video_ve_sesi_birlestir_4k_ve_senkronize(
                 "-r", "30",
                 intro_yolu
             ]
-            res_intro = subprocess.run(intro_komut, capture_output=True, text=True, timeout=30)
+            res_intro = subprocess.run(intro_komut, capture_output=True, text=True, timeout=20)
             if res_intro.returncode == 0 and os.path.exists(intro_yolu):
                 has_intro = True
 
@@ -256,8 +253,8 @@ def video_ve_sesi_birlestir_4k_ve_senkronize(
                 cikti_v_yolu
             ]
 
-        log_ekle("🎬 4K Upscale (boşluksuz, kırpmalı), süre senkronizasyonu ve ses birleştirme yapılıyor...")
-        proje = subprocess.run(komut, capture_output=True, text=True, timeout=600)
+        log_ekle("🎬 4K Upscale, süre senkronizasyonu ve ses birleştirme yapılıyor...")
+        proje = subprocess.run(komut, capture_output=True, text=True, timeout=300)
         
         temp_dosya_temizle(intro_yolu)
 
@@ -333,7 +330,7 @@ def sistem_talimati_olustur(sure_saniye: int, icerik_tonu: str) -> str:
     if "Eğlence Ağırlıklı" in icerik_tonu:
         bilgi_orani = "Her 4 cümleden 1'i TEKNİK BİLGİ, 3'ü SAMİMİ YORUM/EĞLENCE. Hikaye, espri, kişisel deneyim, 'düşünsene' anları ağırlıklı. Teknik bilgi sadece vurgu için kullanılmalı."
     elif "Bilgi Ağırlıklı" in icerik_tonu:
-        bilgi_orani = "Her 4 cümleden 3'ü TEKNİK BİLGİ, 1'i SAMİMİ YORUM. Rakam, karşılaştırma, teknik detay, performans verisi ağırlıklı. Eğlence sadece nefes aldırmak için."
+        bilgi_orani = "Her 4 cümlerden 3'ü TEKNİK BİLGİ, 1'i SAMİMİ YORUM. Rakam, karşılaştırma, teknik detay, performans verisi ağırlıklı. Eğlence sadece nefes aldırmak için."
     elif "Teknik Odaklı" in icerik_tonu:
         bilgi_orani = "Her 10 cümleden 9'u TEKNİK BİLGİ, 1'i SAMİMİ YORUM. Neredeyse her cümle veri/rakam/karşılaştırma içermeli. Eğlence minimum, bilgi maksimum."
     else:
