@@ -52,8 +52,6 @@ if "video_analiz_notlari" not in st.session_state:
     st.session_state.video_analiz_notlari = ""
 if "metin_uretim_notlari" not in st.session_state:
     st.session_state.metin_uretim_notlari = ""
-if "icerik_tonu" not in st.session_state:
-    st.session_state.icerik_tonu = "⚖️ Dengeli (%50 bilgi)"
 
 router = SmartRouter()
 eski_ses_dosyalarini_temizle()
@@ -167,8 +165,7 @@ icerik_tonu = st.radio(
     "🎯 İçerik Tonu",
     ["🎭 Eğlence Ağırlıklı (%25 bilgi)", "⚖️ Dengeli (%50 bilgi)", "🧠 Bilgi Ağırlıklı (%75 bilgi)", "📊 Teknik Odaklı (%90 bilgi)"],
     index=1,
-    horizontal=True,
-    key="icerik_tonu"
+    horizontal=True
 )
 
 buton_tiklandi = st.button("🚀 ÜRET VE 4K HAZIRLA!", disabled=uploaded_video is None, use_container_width=True)
@@ -194,16 +191,12 @@ def log_ekle(satir: str) -> None:
 def ilerlemeyi_guncelle(adim: int, toplam: int, mesaj: str) -> None:
     progress_bar.progress(adim / toplam, text=mesaj)
 
-def sekmeyi_aktif_tut() -> None:
-    pass
-
 gunlugu_ciz()
 
 # ============================================================
 # ÜRETİM AKIŞI
 # ============================================================
 if buton_tiklandi and uploaded_video is not None:
-    sekmeyi_aktif_tut()
     st.session_state.log_satirlari = []
     log_ekle("🚀 Üretim başladı...")
     ilerlemeyi_guncelle(0, 4, "Başlatılıyor...")
@@ -244,6 +237,10 @@ if buton_tiklandi and uploaded_video is not None:
                 kapak_saniyesi = float(match_kapak.group(1))
             except ValueError:
                 pass
+        
+        if kapak_saniyesi <= 0.2:
+            kapak_saniyesi = min(2.0, max(0.5, sure_saniye / 4.0))
+
         log_ekle(f"📸 Tespit edilen kapak anı saniyesi: {kapak_saniyesi}sn")
 
         video_icerigi = f"VİDEO ANALİZ SONUCU:\n{analiz_metni}\n\nMETİN ÜRETİM NOTLARI:\n{metin_uretim_notlari.strip() if metin_uretim_notlari.strip() else 'Ek not yok.'}"
@@ -315,7 +312,7 @@ if buton_tiklandi and uploaded_video is not None:
         if ses_basarili and os.path.exists(ses_dosyasi):
             st.session_state.gecici_ses_dosyalari.append(ses_dosyasi)
 
-        # OTOMATİK 4K RENDER VE SENKRONİZASYON (Süre karşılaştırma ve kapak ekleme dahil)
+        # OTOMATİK 4K RENDER VE SENKRONİZASYON
         log_ekle("🎬 Otomatik 4K upscale, ses senkronizasyonu ve kapak yerleşimi başlatılıyor...")
         output_4k_path = os.path.join(tempfile.gettempdir(), f"output_4k_{uuid.uuid4().hex[:8]}.mp4")
         output_kapak_path = os.path.join(tempfile.gettempdir(), f"kapak_{uuid.uuid4().hex[:8]}.jpg")
@@ -376,7 +373,6 @@ if buton_tiklandi and uploaded_video is not None:
 # SONUÇLARI GÖSTER
 # ============================================================
 if st.session_state.sonuc:
-    sekmeyi_aktif_tut()
     sonuc = st.session_state.sonuc
     veri = sonuc["veri"]
     kullanilan_metin_modeli = sonuc.get("kullanilan_metin_modeli", "?")
@@ -528,6 +524,6 @@ if st.session_state.sonuc:
                 log_ekle("✅ Yeni ses ve 4K video başarıyla güncellendi.")
                 st.rerun()
             else:
-                st.error("❌ Ses üretilemedi. Logları kontrol edin.")
+                log_ekle("❌ Ses üretilemedi.")
                 if os.path.exists(yeni_ses_dosyasi):
                     temp_dosya_temizle(yeni_ses_dosyasi)
