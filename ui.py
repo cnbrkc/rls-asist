@@ -86,7 +86,7 @@ with st.sidebar:
         if aktif_ban:
             for ban_key, bitis in aktif_ban.items():
                 kalan = int(bitis - now)
-                kalan_str = f"{kalan // 3600}s" if kalan > 3600 else f"{kalan // 60}dk"
+                kalan_str = f"{kalan // 3600}sa" if kalan > 3600 else f"{kalan // 60}dk"
                 st.caption(f"⛔ {ban_key} ({kalan_str})")
         else:
             st.caption("✅ Temiz")
@@ -434,7 +434,7 @@ if st.session_state.sonuc:
         if sonuc.get("kapak_resmi_yolu") and os.path.exists(sonuc["kapak_resmi_yolu"]):
             with open(sonuc["kapak_resmi_yolu"], "rb") as f:
                 img_bytes = f.read()
-            st.image(img_bytes, caption="En çarpıcı an (Kapak)", use_column_width=True)
+            st.image(img_bytes, caption="En çarpıcı an (Kapak)", use_container_width=True)
             st.download_button(
                 "⬇️ Kapak Fotoğrafını İndir (.jpg)",
                 img_bytes,
