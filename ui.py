@@ -342,7 +342,7 @@ if buton_tiklandi and uploaded_video is not None:
         if ses_basarili and os.path.exists(ses_dosyasi):
             st.session_state.gecici_ses_dosyalari.append(ses_dosyasi)
 
-        # VİDEO + SES BİRLEŞTİRME (4K yok, kapak yok — sadece ses ekle)
+        # VİDEO + SES BİRLEŞTİRME
         log_ekle("🎬 Videoya AI sesi ekleniyor...")
         output_video_path = os.path.join(tempfile.gettempdir(), f"output_{uuid.uuid4().hex[:8]}.mp4")
 
@@ -441,12 +441,48 @@ if st.session_state.sonuc:
         with open(sonuc["final_video"], "rb") as f:
             vid_bytes = f.read()
         st.video(vid_bytes)
-        st.download_button(
-            "⬇️ Videoyu İndir (.mp4)",
-            vid_bytes,
-            file_name="otoxtra_sesli.mp4",
-            mime="video/mp4"
-        )
+
+        c_dl, c_share = st.columns(2)
+        with c_dl:
+            st.download_button(
+                "⬇️ İndir (.mp4)",
+                vid_bytes,
+                file_name="otoxtra_sesli.mp4",
+                mime="video/mp4",
+                use_container_width=True
+            )
+        with c_share:
+            # Web Share API → iOS'ta "Videoyu Kaydet" = Fotoğraflara gider
+            import base64
+            vid_b64 = base64.b64encode(vid_bytes).decode()
+            components.html(f"""
+            <button onclick="shareVideo()" style="
+                width:100%;height:48px;font-size:16px;font-weight:600;
+                background:linear-gradient(135deg,#ff4b4b,#ff6b6b);
+                color:#fff;border:none;border-radius:8px;cursor:pointer;
+            ">📤 Paylaş / Galer Kaydet</button>
+            <script>
+            async function shareVideo() {{
+                try {{
+                    const b64 = "{vid_b64}";
+                    const bin = atob(b64);
+                    const arr = new Uint8Array(bin.length);
+                    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+                    const file = new File([arr], 'otoxtra_sesli.mp4', {{ type: 'video/mp4' }});
+                    if (navigator.share && navigator.canShare({{ files: [file] }})) {{
+                        await navigator.share({{ files: [file], title: 'otoXtra Video' }});
+                    }} else {{
+                        const url = URL.createObjectURL(file);
+                        const a = document.createElement('a');
+                        a.href = url; a.download = 'otoxtra_sesli.mp4'; a.click();
+                        URL.revokeObjectURL(url);
+                    }}
+                }} catch(e) {{
+                    console.log('Share:', e);
+                }}
+            }}
+            </script>
+            """, height=55)
     else:
         st.warning("⚠️ Video dosyası oluşturulamadı (ffmpeg hatası). Sadece ses mevcut.")
 
