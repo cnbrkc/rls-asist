@@ -195,34 +195,7 @@ def ilerlemeyi_guncelle(adim: int, toplam: int, mesaj: str) -> None:
     progress_bar.progress(adim / toplam, text=mesaj)
 
 def sekmeyi_aktif_tut() -> None:
-    components.html("""
-    <script>
-    async function keepAlive() {
-        if ('wakeLock' in navigator) {
-            try {
-                let wakeLock = await navigator.wakeLock.request('screen');
-                document.addEventListener('visibilitychange', async () => {
-                    if (wakeLock !== null && document.visibilityState === 'visible') {
-                        wakeLock = await navigator.wakeLock.request('screen');
-                    }
-                });
-            } catch (err) {}
-        }
-        try {
-            var audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            var oscillator = audioContext.createOscillator();
-            var gainNode = audioContext.createGain();
-            gainNode.gain.value = 0.00001;
-            oscillator.connect(gainNode);
-            gainNode.connect(audioContext.destination);
-            setInterval(() => { if (audioContext.state === 'suspended') audioContext.resume(); }, 2000);
-            oscillator.start(0);
-            window.addEventListener('beforeunload', function() { oscillator.stop(); });
-        } catch(e) {}
-    }
-    keepAlive();
-    </script>
-    """, height=0)
+    pass
 
 gunlugu_ciz()
 
