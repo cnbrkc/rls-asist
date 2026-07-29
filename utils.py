@@ -131,6 +131,22 @@ def sesi_hizlandir(giris_dosyasi: str, cikti_dosyasi: str, hiz_carpani: float, l
 
 # ===== VİDEO SÜRE TESPİTİ VE İŞLEME =====
 def video_suresini_al(video_yolu: str) -> float:
+    # 1. Yöntem: OpenCV ile çok hızlı süre okuma (0.01 saniye sürer)
+    try:
+        import cv2
+        cap = cv2.VideoCapture(video_yolu)
+        if cap.isOpened():
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+            cap.release()
+            if fps > 0 and frame_count > 0:
+                sure = frame_count / fps
+                if sure > 0:
+                    return sure
+    except Exception:
+        pass
+
+    # 2. Yöntem: ffprobe ile okuma
     komut = [
         "ffprobe", "-v", "error",
         "-select_streams", "v:0",
@@ -139,12 +155,15 @@ def video_suresini_al(video_yolu: str) -> float:
         video_yolu
     ]
     try:
-        sonuc = subprocess.run(komut, capture_output=True, text=True, timeout=15)
+        sonuc = subprocess.run(komut, capture_output=True, text=True, timeout=3)
         if sonuc.returncode == 0 and sonuc.stdout.strip():
-            return float(sonuc.stdout.strip())
+            val = float(sonuc.stdout.strip())
+            if val > 0:
+                return val
     except Exception:
         pass
-    return 30.0
+
+    return 0.0
 
 def kapak_fotografi_cikar(video_yolu: str, saniye: float, cikti_resim_yolu: str, log_ekle) -> bool:
     komut = [
@@ -316,7 +335,7 @@ def sistem_talimati_olustur(sure_saniye: int, icerik_tonu: str) -> str:
     elif "Bilgi Ağırlıklı" in icerik_tonu:
         bilgi_orani = "Her 4 cümleden 3'ü TEKNİK BİLGİ, 1'i SAMİMİ YORUM. Rakam, karşılaştırma, teknik detay, performans verisi ağırlıklı. Eğlence sadece nefes aldırmak için."
     elif "Teknik Odaklı" in icerik_tonu:
-        bilgi_orani = "Her 10 cümlerden 9'u TEKNİK BİLGİ, 1'i SAMİMİ YORUM. Neredeyse her cümle veri/rakam/karşılaştırma içermeli. Eğlence minimum, bilgi maksimum."
+        bilgi_orani = "Her 10 cümleden 9'u TEKNİK BİLGİ, 1'i SAMİMİ YORUM. Neredeyse her cümle veri/rakam/karşılaştırma içermeli. Eğlence minimum, bilgi maksimum."
     else:
         bilgi_orani = "Her 2 cümleden 1'i TEKNİK BİLGİ, 1'i SAMİMİ YORUM. Bilgi ve eğlence dengeli dağılım. Ne çok sıkıcı ne de çok boş."
 
