@@ -1,2 +1,5 @@
 [runner]
 magicEnabled = true
+
+[server]
+maxUploadSize = 50
