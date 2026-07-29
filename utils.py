@@ -359,7 +359,7 @@ def video_analiz_promptunu_olustur(ek_notlar_bolumu: str, sure_saniye: int) -> s
 def sistem_talimati_olustur(sure_saniye: int, icerik_tonu: str) -> str:
     # Kelime hedefi: TTS modeli Türkçe'de ~1.7 kelime/saniye üretiyor
     # 2.0 k/s hedefle → AI biraz fazlaysa bile video süresine yakın kalır
-    hedef_kelime = round(sure_saniye * 2.0 / 5) * 5
+    hedef_kelime = round(sure_saniye * 2.4 / 5) * 5
     min_kelime = max(5, int(hedef_kelime * 0.85))
     max_kelime = int(hedef_kelime * 1.1)
 
