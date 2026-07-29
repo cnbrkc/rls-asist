@@ -12,7 +12,7 @@ from utils import (
     kayitlari_yukle, tum_kayitlari_sil, kayit_ekle,
     eski_ses_dosyalarini_temizle, prompt_dosyasini_oku,
     sistem_talimati_olustur, markdown_temizle, kapak_basliklarini_formatla,
-    temp_dosya_temizle, video_suresini_al, video_ve_sesi_birlestir_4k_ve_senkronize
+    temp_dosya_temizle, video_suresini_al, video_ve_sesi_birlestir
 )
 from router import SmartRouter
 
@@ -35,7 +35,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown("### 🏎️ otoXtra")
-st.caption("Reels + Threads otomatik üretim & 4K Ses/Görsel Optimizasyonu")
+st.caption("Reels + Threads otomatik üretim & Ses/Video Birleştirme")
 
 # ============================================================
 # SESSION STATE BAŞLATMA
@@ -117,9 +117,7 @@ with st.sidebar:
                     "kullanilan_metin_modeli": "geçmiş",
                     "kullanilan_ses_modeli": "geçmiş",
                     "kullanilan_threads_modeli": "geçmiş",
-                    "kapak_saniyesi": 1.0,
-                    "kapak_resmi_yolu": "",
-                    "final_4k_video": ""
+                    "final_video": ""
                 }
                 st.session_state._sonuc_versiyon += 1
                 st.rerun()
@@ -134,9 +132,9 @@ with st.sidebar:
 # ANA ARAYÜZ
 # ============================================================
 uploaded_video = st.file_uploader(
-    "🎥 Referans Video (Süre ve kapak otomatik algılanır)",
+    "🎥 Referans Video (Süre otomatik algılanır)",
     type=['mp4', 'mov', 'webm'],
-    help="Videoyu yüklersiniz; süre otomatik tespit edilir ve ses/4K render buna göre ayarlanır.",
+    help="Videoyu yüklersiniz; süre otomatik tespit edilir ve ses buna göre ayarlanır.",
     key="video_uploader"
 )
 video_buyuk = uploaded_video is not None and uploaded_video.size > 50 * 1024 * 1024
@@ -190,7 +188,7 @@ icerik_tonu = st.radio(
     key="icerik_tonu"
 )
 
-buton_tiklandi = st.button("🚀 ÜRET VE 4K HAZIRLA!", disabled=uploaded_video is None, use_container_width=True)
+buton_tiklandi = st.button("🚀 ÜRET!", disabled=uploaded_video is None, use_container_width=True)
 if uploaded_video is None:
     st.info("💡 Devam etmek için lütfen yukarıdan bir video yükleyin.")
 
@@ -231,7 +229,7 @@ if buton_tiklandi and uploaded_video is not None:
         log_ekle(f"⏱️ İşlenen video süresi: {sure_saniye} saniye")
 
         # ADIM 1: Video Analiz
-        ilerlemeyi_guncelle(1, 4, "🎥 Video analiz ediliyor (Kapak anı tespit ediliyor)...")
+        ilerlemeyi_guncelle(1, 4, "🎥 Video analiz ediliyor...")
         log_ekle("🎥 Video analiz ediliyor...")
         
         analiz_metni, _ = router.video_analiz_et(
@@ -241,20 +239,6 @@ if buton_tiklandi and uploaded_video is not None:
             sure_saniye,
             log_ekle
         )
-
-        # Kapak anı saniye tespiti
-        kapak_saniyesi = 1.0
-        match_kapak = re.search(r"KAPAK_ANI_SANİYE[:\s]+([\d\.]+)", analiz_metni, re.IGNORECASE)
-        if match_kapak:
-            try:
-                kapak_saniyesi = float(match_kapak.group(1))
-            except ValueError:
-                pass
-        
-        if kapak_saniyesi <= 0.2:
-            kapak_saniyesi = min(2.0, max(0.5, sure_saniye / 4.0))
-
-        log_ekle(f"📸 Tespit edilen kapak anı saniyesi: {kapak_saniyesi:.1f}sn")
 
         video_icerigi = f"VİDEO ANALİZ SONUCU:\n{analiz_metni}\n\nMETİN ÜRETİM NOTLARI:\n{metin_uretim_notlari.strip() if metin_uretim_notlari.strip() else 'Ek not yok.'}"
 
@@ -325,22 +309,18 @@ if buton_tiklandi and uploaded_video is not None:
         if ses_basarili and os.path.exists(ses_dosyasi):
             st.session_state.gecici_ses_dosyalari.append(ses_dosyasi)
 
-        # OTOMATİK 4K RENDER VE SENKRONİZASYON (Süre karşılaştırma ve kapak ekleme dahil)
-        log_ekle("🎬 Otomatik 4K upscale, ses senkronizasyonu ve kapak yerleşimi başlatılıyor...")
-        output_4k_path = os.path.join(tempfile.gettempdir(), f"output_4k_{uuid.uuid4().hex[:8]}.mp4")
-        output_kapak_path = os.path.join(tempfile.gettempdir(), f"kapak_{uuid.uuid4().hex[:8]}.jpg")
+        # VİDEO + SES BİRLEŞTİRME (4K yok, kapak yok — sadece ses ekle)
+        log_ekle("🎬 Videoya AI sesi ekleniyor...")
+        output_video_path = os.path.join(tempfile.gettempdir(), f"output_{uuid.uuid4().hex[:8]}.mp4")
 
-        render_basarili = video_ve_sesi_birlestir_4k_ve_senkronize(
+        render_basarili = video_ve_sesi_birlestir(
             temp_input_video,
             ses_dosyasi,
-            kapak_saniyesi,
-            output_4k_path,
-            output_kapak_path,
+            output_video_path,
             log_ekle
         )
 
-        final_video_yolu = output_4k_path if (render_basarili and os.path.exists(output_4k_path)) else ""
-        final_kapak_yolu = output_kapak_path if (os.path.exists(output_kapak_path)) else ""
+        final_video_yolu = output_video_path if (render_basarili and os.path.exists(output_video_path)) else ""
 
         log_ekle("🏁 Tamamlandı.")
         ilerlemeyi_guncelle(4, 4, "✅ Tamamlandı!")
@@ -363,9 +343,7 @@ if buton_tiklandi and uploaded_video is not None:
             "kullanilan_metin_modeli": kullanilan_metin_modeli,
             "kullanilan_ses_modeli": kullanilan_ses_modeli,
             "kullanilan_threads_modeli": kullanilan_threads_modeli,
-            "kapak_saniyesi": kapak_saniyesi,
-            "kapak_resmi_yolu": final_kapak_yolu,
-            "final_4k_video": final_video_yolu,
+            "final_video": final_video_yolu,
         }
         st.session_state._sonuc_versiyon += 1
 
@@ -398,10 +376,8 @@ if st.session_state.sonuc:
         if st.button("🗑️ Geçmiş Üretimleri Temizle", use_container_width=True):
             if sonuc.get("ses_dosyasi") and os.path.exists(sonuc["ses_dosyasi"]):
                 temp_dosya_temizle(sonuc["ses_dosyasi"])
-            if sonuc.get("final_4k_video") and os.path.exists(sonuc["final_4k_video"]):
-                temp_dosya_temizle(sonuc["final_4k_video"])
-            if sonuc.get("kapak_resmi_yolu") and os.path.exists(sonuc["kapak_resmi_yolu"]):
-                temp_dosya_temizle(sonuc["kapak_resmi_yolu"])
+            if sonuc.get("final_video") and os.path.exists(sonuc["final_video"]):
+                temp_dosya_temizle(sonuc["final_video"])
             for dosya in st.session_state.gecici_ses_dosyalari:
                 temp_dosya_temizle(dosya)
             st.session_state.gecici_ses_dosyalari = []
@@ -411,38 +387,21 @@ if st.session_state.sonuc:
             tum_kayitlari_sil()
             st.rerun()
 
-    st.markdown("### 🎬 Hazır 4K Video & Kapak Fotoğrafı")
+    st.markdown("### 🎬 Hazır Video (AI Sesli)")
     
-    col_v, col_img = st.columns([2, 1])
-    with col_v:
-        st.markdown("**📺 4K Optimize Edilmiş & Senkronize Video** (Orijinal ses kapatıldı, AI ses eklendi, boşluksuz 4K upscale yapıldı)")
-        if sonuc.get("final_4k_video") and os.path.exists(sonuc["final_4k_video"]):
-            with open(sonuc["final_4k_video"], "rb") as f:
-                vid_bytes = f.read()
-            st.video(vid_bytes)
-            st.download_button(
-                "⬇️ 4K Optimize Videoyu İndir (.mp4)",
-                vid_bytes,
-                file_name="otoxtra_4k_final.mp4",
-                mime="video/mp4"
-            )
-        else:
-            st.warning("4K video dosyası bulunamadı.")
-
-    with col_img:
-        st.markdown(f"**📸 AI Seçilen Kapak Fotoğrafı** ({sonuc.get('kapak_saniyesi', 1.0):.1f}n)")
-        if sonuc.get("kapak_resmi_yolu") and os.path.exists(sonuc["kapak_resmi_yolu"]):
-            with open(sonuc["kapak_resmi_yolu"], "rb") as f:
-                img_bytes = f.read()
-            st.image(img_bytes, caption="En çarpıcı an (Kapak)", use_container_width=True)
-            st.download_button(
-                "⬇️ Kapak Fotoğrafını İndir (.jpg)",
-                img_bytes,
-                file_name="kapak_fotografi.jpg",
-                mime="image/jpeg"
-            )
-        else:
-            st.info("Kapak fotoğrafı oluşturulamadı.")
+    st.markdown("**📺 AI Ses Eklenmiş Video** (Orijinal video + AI seslendirme)")
+    if sonuc.get("final_video") and os.path.exists(sonuc["final_video"]):
+        with open(sonuc["final_video"], "rb") as f:
+            vid_bytes = f.read()
+        st.video(vid_bytes)
+        st.download_button(
+            "⬇️ Videoyu İndir (.mp4)",
+            vid_bytes,
+            file_name="otoxtra_sesli.mp4",
+            mime="video/mp4"
+        )
+    else:
+        st.warning("⚠️ Video dosyası oluşturulamadı (ffmpeg hatası). Sadece ses mevcut.")
 
     st.divider()
     st.markdown("### 🎧 Medya (Ayrı Ses)")
@@ -518,8 +477,8 @@ if st.session_state.sonuc:
         key="duzenlenmis_ses_metni_widget",
     )
 
-    if st.button("🔄 Bu Metinle Yeniden Ses ve 4K Video Üret"):
-        with st.spinner("Ses ve 4K video yeniden üretiliyor..."):
+    if st.button("🔄 Bu Metinle Yeniden Ses ve Video Üret"):
+        with st.spinner("Ses ve video yeniden üretiliyor..."):
             yeni_ses_dosyasi = os.path.join(tempfile.gettempdir(), f"ses_{uuid.uuid4().hex[:8]}.wav")
             ses_basarili_yeni, kullanilan_ses_modeli_yeni = router.ses_uret(
                 duzenlenmis_ses_metni,
@@ -543,7 +502,7 @@ if st.session_state.sonuc:
                     st.session_state.sonuc["kullanilan_ses_modeli"] = kullanilan_ses_modeli_yeni
                 st.session_state.gecici_ses_dosyalari.append(yeni_ses_dosyasi)
 
-                log_ekle("✅ Yeni ses ve 4K video başarıyla güncellendi.")
+                log_ekle("✅ Yeni ses başarıyla üretildi.")
                 st.rerun()
             else:
                 st.error("❌ Ses üretilemedi. Logları kontrol edin.")
