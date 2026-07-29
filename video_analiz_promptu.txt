@@ -27,6 +27,10 @@ Eğer marka/modeli tespit ettiysen (kullanıcı yazdıysa veya sen bulduysan), H
 - Rakip bir araçla kıyaslandığında ezdiği veya ezildiği nokta nedir?
 Bu bilgiyi "VİRAL DETAYLAR" bölümüne kesinlikle ekle. Eğer marka/model bilinmiyorsa, sadece kategori üzerinden (örn: elektrikli SUV, sedan) Türkiye'deki genel gündemi araştır.
 
+KRİTİK GÖREV 3 — KAPAK ANI SANİYE TESPİTİ:
+Videodaki en çarpıcı, dikkat çekici, kapak fotoğrafı veya ilk kanca (hook) olmaya en uygun anın videodaki saniyesini (örneğin 2.4 veya 14.1 şeklinde ondalıklı sayı olarak) mutlaka tespit et ve metnin EN BAŞINA şu formatta yaz:
+KAPAK_ANI_SANİYE: <saniye>
+
 Bana şu başlıklarda çok net, maddeler halinde rapor ver:
 
 1. GÖRSEL AKIŞ HARİTASI (KRİTİK):
@@ -45,7 +49,7 @@ Marka, model (TAM ADIYLA), videoda görünen kesin özellikler ve google_search 
 
 5. HOOK (GİRİŞ KANCASI) ÖNERİSİ: İlk 3 saniyede kaydırmayı durduracak, AÇILIŞ GÖRSELİYLE ve VİRAL VERİLERLE uyumlu cesur cümle.
 
-6. KANIŞTIRICI KAPANIŞ (CTA/LOOP) ÖNERİSİ: Son 3 saniyede yorum tetikleyecek, KAPANIŞ GÖRSELİYLE uyumlu cümle.
+6. KAPANIŞ (CTA/LOOP) ÖNERİSİ: Son 3 saniyede yorum tetikleyecek, KAPANIŞ GÖRSELİYLE uyumlu cümle.
 
 7. DUYGU AKIŞI: Görsel akışa uygun duygu haritası (Örn: Açılış-merak, Orta-şok, Kapanış-tartışma).
 
