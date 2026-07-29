@@ -95,7 +95,7 @@ class SmartRouter:
             time.sleep(IP_BAN_KORUMA)
             return "devam"
 
-    def _make_request(self, model_listesi: List[str], contents: any, config: types.GenerateContentConfig, log_ekle) -> Tuple[any, str]:
+    def _make_request(self, model_listesi: List[str], contents: Any, config: types.GenerateContentConfig, log_ekle) -> Tuple[Any, str]:
         son_hata = None
         for model_adi in model_listesi:
             log_ekle(f"🧠 Model deneniyor: {model_adi}")
