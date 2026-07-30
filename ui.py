@@ -1,6 +1,5 @@
 import streamlit as st
 import streamlit.components.v1 as components
-import time
 import os
 import uuid
 import traceback
@@ -9,13 +8,13 @@ import tempfile
 
 # Kendi modüllerimiz
 from config import API_KEYS, SES_HIZ_CARpanI, MAX_INPUT_KARAKTER, METIN_MODELLERI
-from utils import (
-    kayitlari_yukle, tum_kayitlari_sil, kayit_ekle,
-    eski_ses_dosyalarini_temizle, prompt_dosyasini_oku,
-    sistem_talimati_olustur, markdown_temizle, kapak_basliklarini_formatla,
-    temp_dosya_temizle, video_suresini_al, video_ve_sesi_birlestir
-)
+from utils import markdown_temizle, kapak_basliklarini_formatla
+from storage import kayit_ekle
+from media import eski_ses_dosyalarini_temizle, temp_dosya_temizle, video_suresini_al, video_ve_sesi_birlestir
+from prompts import prompt_dosyasini_oku, kurallari_oku, sistem_talimati_olustur
 from router import SmartRouter
+from ui_sidebar import render_sidebar
+from ui_results import render_results
 
 # ============================================================
 # SAYFA AYARLARI
@@ -65,74 +64,7 @@ eski_ses_dosyalarini_temizle()
 # ============================================================
 # SIDEBAR
 # ============================================================
-with st.sidebar:
-    st.markdown("**🎙️ Ses**")
-    ses_secimi = st.selectbox(
-        "Seslendiren",
-        [
-            "Autonoe (Parlak - Kadın)", "Puck (Enerjik - Erkek)",
-            "Aoede (Yumuşak - Kadın)", "Callirrhoe (Doğal - Kadın)",
-            "Kore (Net - Kadın)", "Leda (Dinamik - Kadın)",
-            "Zephyr (Parlak - Kadın)", "Charon (Bilgi - Erkek)",
-            "Orus (Sert - Erkek)", "Iapetus (Akıcı - Erkek)",
-            "Umbriel (Rahat - Erkek)"
-        ],
-        label_visibility="collapsed",
-        key="ses_secimi"
-    )
-
-    st.markdown("**🔑 Key'ler**")
-    for mail in API_KEYS.keys():
-        st.caption(f"• {mail}")
-
-    if st.session_state.get("blacklist"):
-        st.markdown("**🚫 Banlar**")
-        now = time.time()
-        aktif_ban = {k: v for k, v in st.session_state.blacklist.items() if v > now}
-        if aktif_ban:
-            for ban_key, bitis in aktif_ban.items():
-                kalan = int(bitis - now)
-                kalan_str = f"{kalan // 3600}sa" if kalan > 3600 else f"{kalan // 60}dk"
-                st.caption(f"⛔ {ban_key} ({kalan_str})")
-        else:
-            st.caption("✅ Temiz")
-
-    st.divider()
-    st.markdown("**📜 Geçmiş Üretimler**")
-
-    kayitlar = kayitlari_yukle()
-    if kayitlar:
-        st.caption(f"Son {len(kayitlar)} üretim:")
-        for i, kayit in enumerate(reversed(kayitlar)):
-            if st.button(
-                f"📝 {kayit.get('tarih', '?')} ({kayit.get('sure_saniye', '?')}sn - {kayit.get('ses_adi', '?')})",
-                key=f"kayit_{i}",
-                use_container_width=True
-            ):
-                st.session_state.sonuc = {
-                    "veri": {
-                        "seslendirme_metni": kayit.get("seslendirme_metni", ""),
-                        "reels_aciklamasi": kayit.get("reels_aciklamasi", ""),
-                        "reels_hashtagleri": kayit.get("reels_hashtagleri", []),
-                        "kapak_basliklari": kayit.get("kapak_basliklari", []),
-                        "threads_aciklamasi": kayit.get("threads_aciklamasi", ""),
-                    },
-                    "ses_basarili": False,
-                    "ses_dosyasi": "",
-                    "secilen_ses_ingilizce": kayit.get("ses_adi", ""),
-                    "kullanilan_metin_modeli": "geçmiş",
-                    "kullanilan_ses_modeli": "geçmiş",
-                    "kullanilan_threads_modeli": "geçmiş",
-                    "final_video": ""
-                }
-                st.session_state._sonuc_versiyon += 1
-                st.rerun()
-    else:
-        st.caption("Henüz kayıt yok")
-
-    if kayitlar and st.button("🗑️ Tüm Geçmişi Sil", use_container_width=True):
-        tum_kayitlari_sil()
-        st.rerun()
+render_sidebar()
 
 # ============================================================
 # ANA ARAYÜZ
@@ -264,7 +196,7 @@ if buton_tiklandi and uploaded_video is not None:
         # ADIM 1: Video Analiz
         ilerlemeyi_guncelle(1, 4, "🎥 Video analiz ediliyor...")
         log_ekle("🎥 Video analiz ediliyor...")
-        
+
         analiz_metni, _ = router.video_analiz_et(
             uploaded_video.getvalue(),
             uploaded_video.type or "video/mp4",
@@ -283,7 +215,7 @@ if buton_tiklandi and uploaded_video is not None:
 
         # ADIM 2: Metin Üretimi
         ilerlemeyi_guncelle(2, 4, "✍️ Metin üretiliyor...")
-        system_prompt = prompt_dosyasini_oku("kurallar.txt") + sistem_talimati_olustur(sure_saniye, icerik_tonu)
+        system_prompt = kurallari_oku() + sistem_talimati_olustur(sure_saniye, icerik_tonu)
 
         response_schema = {
             "type": "OBJECT",
@@ -329,7 +261,7 @@ if buton_tiklandi and uploaded_video is not None:
 
         # ADIM 4: Ses Üretimi
         ilerlemeyi_guncelle(4, 4, "🎙️ Ses üretiliyor...")
-        secilen_ses_ingilizce = ses_secimi.split(" ")[0]
+        secilen_ses_ingilizce = st.session_state.ses_secimi.split(" ")[0]
         ses_dosyasi = os.path.join(tempfile.gettempdir(), f"ses_{uuid.uuid4().hex[:8]}.wav")
         ses_basarili, kullanilan_ses_modeli = router.ses_uret(
             veri["seslendirme_metni"],
@@ -411,183 +343,4 @@ if buton_tiklandi and uploaded_video is not None:
 # ============================================================
 # SONUÇLARI GÖSTER
 # ============================================================
-if st.session_state.sonuc:
-    sonuc = st.session_state.sonuc
-    veri = sonuc["veri"]
-    kullanilan_metin_modeli = sonuc.get("kullanilan_metin_modeli", "?")
-
-    st.success(f"✅ Başarılı! ({kullanilan_metin_modeli})")
-
-    c1, c2 = st.columns([3, 1])
-    with c2:
-        if st.button("🗑️ Geçmiş Üretimleri Temizle", use_container_width=True):
-            if sonuc.get("ses_dosyasi") and os.path.exists(sonuc["ses_dosyasi"]):
-                temp_dosya_temizle(sonuc["ses_dosyasi"])
-            if sonuc.get("final_video") and os.path.exists(sonuc["final_video"]):
-                temp_dosya_temizle(sonuc["final_video"])
-            for dosya in st.session_state.gecici_ses_dosyalari:
-                temp_dosya_temizle(dosya)
-            st.session_state.gecici_ses_dosyalari = []
-            st.session_state.sonuc = None
-            st.session_state.log_satirlari = []
-            st.session_state._sonuc_versiyon += 1
-            tum_kayitlari_sil()
-            st.rerun()
-
-    st.markdown("### 🎬 Hazır Video (AI Sesli)")
-    
-    st.markdown("**📺 AI Ses Eklenmiş Video** (Orijinal video + AI seslendirme)")
-    if sonuc.get("final_video") and os.path.exists(sonuc["final_video"]):
-        with open(sonuc["final_video"], "rb") as f:
-            vid_bytes = f.read()
-        st.video(vid_bytes)
-
-        c_dl, c_share = st.columns(2)
-        with c_dl:
-            st.download_button(
-                "⬇️ İndir (.mp4)",
-                vid_bytes,
-                file_name="otoxtra_sesli.mp4",
-                mime="video/mp4",
-                use_container_width=True
-            )
-        with c_share:
-            # Web Share API → iOS'ta "Videoyu Kaydet" = Fotoğraflara gider
-            import base64
-            vid_b64 = base64.b64encode(vid_bytes).decode()
-            components.html(f"""
-            <button onclick="shareVideo()" style="
-                width:100%;height:48px;font-size:16px;font-weight:600;
-                background:linear-gradient(135deg,#ff4b4b,#ff6b6b);
-                color:#fff;border:none;border-radius:8px;cursor:pointer;
-            ">📤 Paylaş / Galer Kaydet</button>
-            <script>
-            async function shareVideo() {{
-                try {{
-                    const b64 = "{vid_b64}";
-                    const bin = atob(b64);
-                    const arr = new Uint8Array(bin.length);
-                    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-                    const file = new File([arr], 'otoxtra_sesli.mp4', {{ type: 'video/mp4' }});
-                    if (navigator.share && navigator.canShare({{ files: [file] }})) {{
-                        await navigator.share({{ files: [file], title: 'otoXtra Video' }});
-                    }} else {{
-                        const url = URL.createObjectURL(file);
-                        const a = document.createElement('a');
-                        a.href = url; a.download = 'otoxtra_sesli.mp4'; a.click();
-                        URL.revokeObjectURL(url);
-                    }}
-                }} catch(e) {{
-                    console.log('Share:', e);
-                }}
-            }}
-            </script>
-            """, height=55)
-    else:
-        st.warning("⚠️ Video dosyası oluşturulamadı (ffmpeg hatası). Sadece ses mevcut.")
-
-    st.divider()
-    st.markdown("### 🎧 Medya (Ayrı Ses)")
-    st.markdown(f"**🎙️ Seslendirme** (model: {sonuc.get('kullanilan_ses_modeli', '?')})")
-    if sonuc["ses_basarili"] and os.path.exists(sonuc["ses_dosyasi"]):
-        with open(sonuc["ses_dosyasi"], "rb") as f:
-            ses_byte = f.read()
-        st.audio(ses_byte, format="audio/wav")
-        st.download_button(
-            f"⬇️ {sonuc['secilen_ses_ingilizce']} Sesini İndir (.wav)",
-            ses_byte,
-            file_name="seslendirme.wav",
-            mime="audio/wav"
-        )
-    else:
-        if kullanilan_metin_modeli == "geçmiş":
-            st.info("📝 Ayrıntılı geçmiş kayıt. Ses dosyası artık mevcut değil.")
-        else:
-            st.warning("Ses dosyası bulunamadı.")
-
-    st.divider()
-    st.markdown("### 📝 Metin İçerikleri")
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        st.subheader("1️⃣ Reels Açıklaması")
-        st.caption("Katmanlı caption + 5 hashtag")
-        aciklama_metni = markdown_temizle(veri.get("reels_aciklamasi", ""))
-        hashtagler = veri.get("reels_hashtagleri", [])
-        if hashtagler and isinstance(hashtagler, list):
-            hashtag_str = " ".join([h if str(h).startswith("#") else f"#{h}" for h in hashtagler])
-            tam_aciklama = f"{aciklama_metni}\n\n{hashtag_str}"
-        else:
-            tam_aciklama = aciklama_metni
-        st.code(tam_aciklama, language=None)
-
-    with col2:
-        st.subheader("2️⃣ Kapak Başlıkları")
-        st.caption("5 alternatif")
-        st.code(kapak_basliklarini_formatla(veri.get("kapak_basliklari")), language=None)
-
-    with col3:
-        st.subheader("3️⃣ Threads Açıklaması")
-        st.caption(f"Kısa, sohbet havasında, hashtagsiz (Model: {sonuc.get('kullanilan_threads_modeli', '?')})")
-        st.code(markdown_temizle(veri.get("threads_aciklamasi", "")), language=None)
-
-    st.divider()
-    st.markdown("### 🧠 AI Düşünme Zinciri (Strateji)")
-    with st.expander("Yapay Zekanın İç Monoloğunu Gör (Nasıl Karar Verdi?)"):
-        st.markdown("**1. Beyin Fırtınası:**")
-        st.info(veri.get("beyin_firtinasi", "Veri bulunamadı."))
-        st.markdown("**2. Veri Kilitleme:**")
-        st.warning(veri.get("veri_kilitleme", "Veri bulunamadı."))
-        st.markdown("**3. Öz Eleştiri:**")
-        st.error(veri.get("oz_elestiri", "Veri bulunamadı."))
-
-    st.divider()
-    st.markdown("### 🎙️ Seslendirme Metni")
-    st.caption("TTS için üretilen metin. Düzenleyip yeniden ses üretebilirsiniz.")
-
-    # Sonuç değiştiyse (yeni üretim veya geçmiş tıklama) widget key'i temizle
-    if st.session_state._sonuc_versiyon != st.session_state._sonuc_versiyon_last:
-        st.session_state._sonuc_versiyon_last = st.session_state._sonuc_versiyon
-        if "duzenlenmis_ses_metni_widget" in st.session_state:
-            del st.session_state["duzenlenmis_ses_metni_widget"]
-
-    # value parametresi: key yoksa AI metnini, varsa session_state'teki kullanıcı düzenlemesini kullan
-    duzenlenmis_ses_metni = st.text_area(
-        "Seslendirme Metni",
-        value=st.session_state.get("duzenlenmis_ses_metni_widget", veri.get("seslendirme_metni", "")),
-        height=300,
-        label_visibility="collapsed",
-        key="duzenlenmis_ses_metni_widget",
-    )
-
-    if st.button("🔄 Bu Metinle Yeniden Ses ve Video Üret"):
-        with st.spinner("Ses ve video yeniden üretiliyor..."):
-            yeni_ses_dosyasi = os.path.join(tempfile.gettempdir(), f"ses_{uuid.uuid4().hex[:8]}.wav")
-            ses_basarili_yeni, kullanilan_ses_modeli_yeni = router.ses_uret(
-                duzenlenmis_ses_metni,
-                sonuc["secilen_ses_ingilizce"],
-                yeni_ses_dosyasi,
-                log_ekle,
-                hiz_carpani=SES_HIZ_CARpanI,
-            )
-
-            if ses_basarili_yeni and os.path.exists(yeni_ses_dosyasi):
-                eski_ses_dosyasi = sonuc.get("ses_dosyasi", "")
-                if eski_ses_dosyasi and os.path.exists(eski_ses_dosyasi):
-                    temp_dosya_temizle(eski_ses_dosyasi)
-                    if eski_ses_dosyasi in st.session_state.gecici_ses_dosyalari:
-                        st.session_state.gecici_ses_dosyalari.remove(eski_ses_dosyasi)
-
-                st.session_state.sonuc["ses_dosyasi"] = yeni_ses_dosyasi
-                st.session_state.sonuc["ses_basarili"] = True
-                st.session_state.sonuc["veri"]["seslendirme_metni"] = duzenlenmis_ses_metni
-                if kullanilan_ses_modeli_yeni:
-                    st.session_state.sonuc["kullanilan_ses_modeli"] = kullanilan_ses_modeli_yeni
-                st.session_state.gecici_ses_dosyalari.append(yeni_ses_dosyasi)
-
-                log_ekle("✅ Yeni ses başarıyla üretildi.")
-                st.rerun()
-            else:
-                st.error("❌ Ses üretilemedi. Logları kontrol edin.")
-                if os.path.exists(yeni_ses_dosyasi):
-                    temp_dosya_temizle(yeni_ses_dosyasi)
+render_results(log_ekle, router)
