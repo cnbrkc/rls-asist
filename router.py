@@ -1,12 +1,9 @@
 import time
 import re
 import base64
-import wave
 import os
 import shutil
-import tempfile
-import uuid
-from typing import List, Tuple, Any
+from typing import List, Tuple, Any, Optional
 import streamlit as st
 from google import genai
 from google.genai import types
@@ -18,7 +15,7 @@ from config import (
     model_arama_destekliyor_mu
 )
 from utils import guvenli_json_yukle
-from media import sesi_hizlandir, temp_dosya_temizle
+from media import sesi_hizlandir, temp_dosya_temizle, wav_yaz, gecici_dosya_yolu
 from prompts import video_analiz_promptunu_olustur
 
 class SmartRouter:
@@ -139,7 +136,7 @@ class SmartRouter:
         response, info = self._make_request(model_listesi, video_icerigi, config, log_ekle)
         return guvenli_json_yukle(getattr(response, "text", "")), info
 
-    def ses_uret(self, metin: str, ses_adi: str, cikti_dosyasi: str, log_ekle, hiz_carpani: float = 1.0) -> Tuple[bool, str]:
+    def ses_uret(self, metin: str, ses_adi: str, cikti_dosyasi: str, log_ekle, hiz_carpani: float = 1.0) -> Tuple[bool, Optional[str]]:
         config = types.GenerateContentConfig(
             response_modalities=["AUDIO"],
             speech_config=types.SpeechConfig(
@@ -170,20 +167,12 @@ class SmartRouter:
                 audio_data = base64.b64decode(audio_data)
 
             if abs(hiz_carpani - 1.0) < 0.001:
-                with wave.open(cikti_dosyasi, "wb") as wf:
-                    wf.setnchannels(1)
-                    wf.setsampwidth(2)
-                    wf.setframerate(24000)
-                    wf.writeframes(audio_data)
+                wav_yaz(cikti_dosyasi, audio_data)
                 return True, info
 
-            gecici_ham_dosya = os.path.join(tempfile.gettempdir(), f"ses_ham_{uuid.uuid4().hex[:8]}.wav")
+            gecici_ham_dosya = gecici_dosya_yolu("ses_ham", "wav")
             try:
-                with wave.open(gecici_ham_dosya, "wb") as wf:
-                    wf.setnchannels(1)
-                    wf.setsampwidth(2)
-                    wf.setframerate(24000)
-                    wf.writeframes(audio_data)
+                wav_yaz(gecici_ham_dosya, audio_data)
                 log_ekle(f"🎚️ Ses {hiz_carpani}x hızlandırılıyor (ffmpeg atempo, pitch korunur)...")
                 basarili = sesi_hizlandir(gecici_ham_dosya, cikti_dosyasi, hiz_carpani, log_ekle)
                 if not basarili:
