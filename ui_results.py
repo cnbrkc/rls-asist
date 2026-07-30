@@ -1,16 +1,14 @@
-"""Sonuç gösterim bileşeni: Video, ses, metinler, AI düşünme zinciri, yeniden ses üretme."""
+"""Sonuç gösterim bileşeni: Video, ses, metinler, AI düşünme zinciri, yeniden ses+video üretme."""
 import os
 import base64
-import tempfile
-import uuid
 
 import streamlit as st
 import streamlit.components.v1 as components
 
-from config import API_KEYS, SES_HIZ_CARpanI
+from config import SES_HIZ_CARPANI
 from utils import markdown_temizle, kapak_basliklarini_formatla
 from storage import tum_kayitlari_sil
-from media import temp_dosya_temizle, video_ve_sesi_birlestir
+from media import temp_dosya_temizle, video_ve_sesi_birlestir, gecici_ses_yolu, gecici_dosya_yolu
 
 
 def render_results(log_ekle, router) -> None:
@@ -31,6 +29,8 @@ def render_results(log_ekle, router) -> None:
                 temp_dosya_temizle(sonuc["ses_dosyasi"])
             if sonuc.get("final_video") and os.path.exists(sonuc["final_video"]):
                 temp_dosya_temizle(sonuc["final_video"])
+            if sonuc.get("temp_input_video") and os.path.exists(sonuc["temp_input_video"]):
+                temp_dosya_temizle(sonuc["temp_input_video"])
             for dosya in st.session_state.gecici_ses_dosyalari:
                 temp_dosya_temizle(dosya)
             st.session_state.gecici_ses_dosyalari = []
@@ -148,7 +148,7 @@ def render_results(log_ekle, router) -> None:
 
     st.divider()
     st.markdown("### 🎙️ Seslendirme Metni")
-    st.caption("TTS için üretilen metin. Düzenleyip yeniden ses üretebilirsiniz.")
+    st.caption("TTS için üretilen metin. Düzenleyip yeniden ses ve video üretebilirsiniz.")
 
     # Sonuç değiştiyse (yeni üretim veya geçmiş tıklama) widget key'i temizle
     if st.session_state._sonuc_versiyon != st.session_state._sonuc_versiyon_last:
@@ -167,30 +167,52 @@ def render_results(log_ekle, router) -> None:
 
     if st.button("🔄 Bu Metinle Yeniden Ses ve Video Üret"):
         with st.spinner("Ses ve video yeniden üretiliyor..."):
-            yeni_ses_dosyasi = os.path.join(tempfile.gettempdir(), f"ses_{uuid.uuid4().hex[:8]}.wav")
+            yeni_ses_dosyasi = gecici_ses_yolu()
             ses_basarili_yeni, kullanilan_ses_modeli_yeni = router.ses_uret(
                 duzenlenmis_ses_metni,
                 sonuc["secilen_ses_ingilizce"],
                 yeni_ses_dosyasi,
                 log_ekle,
-                hiz_carpani=SES_HIZ_CARpanI,
+                hiz_carpani=SES_HIZ_CARPANI,
             )
 
             if ses_basarili_yeni and os.path.exists(yeni_ses_dosyasi):
+                # Eski ses dosyasını temizle
                 eski_ses_dosyasi = sonuc.get("ses_dosyasi", "")
                 if eski_ses_dosyasi and os.path.exists(eski_ses_dosyasi):
                     temp_dosya_temizle(eski_ses_dosyasi)
                     if eski_ses_dosyasi in st.session_state.gecici_ses_dosyalari:
                         st.session_state.gecici_ses_dosyalari.remove(eski_ses_dosyasi)
 
+                st.session_state.gecici_ses_dosyalari.append(yeni_ses_dosyasi)
+
+                # Video + ses birleştirme (orijinal video varsa)
+                temp_input_video = sonuc.get("temp_input_video", "")
+                if temp_input_video and os.path.exists(temp_input_video):
+                    yeni_output_video = gecici_dosya_yolu("output", "mp4")
+                    render_basarili = video_ve_sesi_birlestir(
+                        temp_input_video,
+                        yeni_ses_dosyasi,
+                        yeni_output_video,
+                        log_ekle
+                    )
+                    if render_basarili and os.path.exists(yeni_output_video):
+                        # Eski videoyu temizle
+                        eski_video = sonuc.get("final_video", "")
+                        if eski_video and os.path.exists(eski_video):
+                            temp_dosya_temizle(eski_video)
+                        st.session_state.sonuc["final_video"] = yeni_output_video
+                        log_ekle("✅ Yeni video başarıyla üretildi.")
+                    else:
+                        log_ekle("⚠️ Video birleştirme başarısız, sadece ses güncellendi.")
+                else:
+                    log_ekle("⚠️ Orijinal video dosyası bulunamadı, sadece ses güncellendi.")
+
                 st.session_state.sonuc["ses_dosyasi"] = yeni_ses_dosyasi
                 st.session_state.sonuc["ses_basarili"] = True
                 st.session_state.sonuc["veri"]["seslendirme_metni"] = duzenlenmis_ses_metni
                 if kullanilan_ses_modeli_yeni:
                     st.session_state.sonuc["kullanilan_ses_modeli"] = kullanilan_ses_modeli_yeni
-                st.session_state.gecici_ses_dosyalari.append(yeni_ses_dosyasi)
-
-                log_ekle("✅ Yeni ses başarıyla üretildi.")
                 st.rerun()
             else:
                 st.error("❌ Ses üretilemedi. Logları kontrol edin.")
