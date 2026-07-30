@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from typing import List
 
-from config import KAYIT_DOSYASI, MAX_KAYIT
+from config import KAYIT_DOSYASI, MAX_KAYIT, guncel_tarih_metni
 
 # ===== KAYIT YÖNETİMİ =====
 def kayitlari_yukle() -> List[dict]:
@@ -26,7 +26,7 @@ def kayitlari_kaydet(kayitlar: List[dict]) -> None:
 def kayit_ekle(uretim_verisi: dict) -> None:
     kayitlar = kayitlari_yukle()
     kayit = {
-        "tarih": datetime.now().strftime("%d %B %Y %H:%M"),
+        "tarih": f"{guncel_tarih_metni()} {datetime.now().strftime('%H:%M')}",
         "seslendirme_metni": uretim_verisi.get("seslendirme_metni", ""),
         "reels_aciklamasi": uretim_verisi.get("reels_aciklamasi", ""),
         "reels_hashtagleri": uretim_verisi.get("reels_hashtagleri", []),
