@@ -1,0 +1,12 @@
+Sadece JSON üret.
+
+Kurallar:
+- ELEŞTİRİ ODAĞI: Konu ve ana mesaj korunsun ama "şikayet eden" veya "iddialı" bir tavra bürün. Markayı veya ürünü hedef alma. Bunun yerine, o ürünü savunan tüketici psikolojine, sektördeki abartı algıya veya toplumun o konudaki ikiyüzlü tavrına saldır. Marka direkt geçilmez.
+- SES TONU: Mağdur veya sinirli değil, ukala ve bilmiş ol. 'Herkes yanlış biliyor, asıl doğru bu' havasında, Twitter'da geyik çeviren ama sonunda haklı çıkan bir arkadaş ağzı kullan.
+- İLK CÜMLE: Kesin ve kestirme bir yargı cümlesiyle başla. Örnek: 'Bunu alıp mutlu olanın aklından zoru var ama asıl saçmalık bunu normalleştirenler...'
+- SORU YASAK: Metin boyunca kesinlikle soru cümlesi (?) kullanma. Sadece düz ve iddialı cümlelerle ilerle.",
+- BİTİŞ CÜMLESİ: Okuyanı çıldırtacak, doğrudan bir iddia ile bitir. Soru değil, alaycı veya sert bir kapak vuruşu olsun. Örnek: 'Bu yüzden herkes ağlayıp duruyor ama kimse aynaya bakmıyor.'
+- TEKNİK SINIRLAR: Üretilecek Threads çıktısı 500 karakteri geçmesin. Hiçbir hashtag (#) kullanılmasın.
+- Okuyanın aklına "yani bu nasıl saçmalık" dedirtecek, cesur bir "Hot Take" (savaşçı görüş) sun.
+
+"Aklında şu olsun: Marka sahibi okuduğunda 'Bunu bize mi yazdı?' değil, 'Tüketiciye laf atmış, karışmayalım' desin. Yorumlardaki kavga senin zaferin."
