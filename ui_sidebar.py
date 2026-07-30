@@ -2,7 +2,7 @@
 import time
 import streamlit as st
 
-from config import API_KEYS
+from config import API_KEYS, SES_SECENEKLERI
 from storage import kayitlari_yukle, tum_kayitlari_sil
 
 
@@ -12,14 +12,7 @@ def render_sidebar() -> None:
         st.markdown("**🎙️ Ses**")
         ses_secimi = st.selectbox(
             "Seslendiren",
-            [
-                "Autonoe (Parlak - Kadın)", "Puck (Enerjik - Erkek)",
-                "Aoede (Yumuşak - Kadın)", "Callirrhoe (Doğal - Kadın)",
-                "Kore (Net - Kadın)", "Leda (Dinamik - Kadın)",
-                "Zephyr (Parlak - Kadın)", "Charon (Bilgi - Erkek)",
-                "Orus (Sert - Erkek)", "Iapetus (Akıcı - Erkek)",
-                "Umbriel (Rahat - Erkek)"
-            ],
+            SES_SECENEKLERI,
             label_visibility="collapsed",
             key="ses_secimi"
         )
