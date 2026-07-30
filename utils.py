@@ -35,11 +35,13 @@ def guvenli_json_yukle(response_text: str) -> dict:
             return json.loads(temiz_md)
         except json.JSONDecodeError:
             pass
-        start = temiz.find('{')
-        end = temiz.rfind('}')
-        if start != -1 and end != -1 and end > start:
-            try:
-                return json.loads(temiz[start:end+1])
-            except json.JSONDecodeError:
-                pass
+        # JSON obje veya dizi köşünü bul
+        for ac, kapa in [('{', '}'), ('[', ']')]:
+            start = temiz.find(ac)
+            end = temiz.rfind(kapa)
+            if start != -1 and end != -1 and end > start:
+                try:
+                    return json.loads(temiz[start:end+1])
+                except json.JSONDecodeError:
+                    pass
         raise ValueError(f"JSON parse edilemedi. Ham yanıt: {temiz[:200]}...")
