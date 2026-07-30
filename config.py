@@ -24,6 +24,10 @@ COOLDOWN_FREE_TIER_YOK = 7 * 24 * 60 * 60
 IP_BAN_KORUMA = 1.0
 QUOTA_RETRY_DEFAULT = 60
 
+# ===== KELİME HESAPLAMA =====
+KELIME_HIZI_ORANI = 2.4   # TTS Türkçe ~1.7 k/s, 2.0 hedefle → AI biraz fazlaysa bile video süresine yakın kalır
+KELIME_YUVARLAMA = 5      # En yakın 5'in katına yuvarla
+
 # ===== DİĞER SABİTLER =====
 MAX_INPUT_KARAKTER = 900_000
 KAYIT_DOSYASI = "kayitlar.json"
