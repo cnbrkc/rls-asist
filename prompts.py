@@ -5,6 +5,7 @@ import streamlit as st
 from config import (
     guncel_tarih_metni,
     KELIME_HIZI_ORANI, KELIME_YUVARLAMA,
+    TON_EGLENCE, TON_BILGI, TON_TEKNIK,
 )
 
 # ===== PROMPT DOSYASI OKUMA =====
@@ -46,11 +47,11 @@ def sistem_talimati_olustur(sure_saniye: int, icerik_tonu: str) -> str:
     min_kelime = max(5, int(hedef_kelime * 0.85))
     max_kelime = int(hedef_kelime * 1.1)
 
-    if "Eğlence Ağırlıklı" in icerik_tonu:
+    if icerik_tonu == TON_EGLENCE:
         bilgi_orani = "Her 4 cümleden 1'i TEKNİK BİLGİ, 3'ü SAMİMİ YORUM/EĞLENCE. Hikaye, espri, kişisel deneyim, 'düşünsene' anları ağırlıklı. Teknik bilgi sadece vurgu için kullanılmalı."
-    elif "Bilgi Ağırlıklı" in icerik_tonu:
+    elif icerik_tonu == TON_BILGI:
         bilgi_orani = "Her 4 cümleden 3'ü TEKNİK BİLGİ, 1'i SAMİMİ YORUM. Rakam, karşılaştırma, teknik detay, performans verisi ağırlıklı. Eğlence sadece nefes aldırmak için."
-    elif "Teknik Odaklı" in icerik_tonu:
+    elif icerik_tonu == TON_TEKNIK:
         bilgi_orani = "Her 10 cümleden 9'u TEKNİK BİLGİ, 1'i SAMİMİ YORUM. Neredeyse her cümle veri/rakam/karşılaştırma içermeli. Eğlence minimum, bilgi maksimum."
     else:
         bilgi_orani = "Her 2 cümleden 1'i TEKNİK BİLGİ, 1'i SAMİMİ YORUM. Bilgi ve eğlence dengeli dağılım. Ne çok sıkıcı ne de çok boş."
