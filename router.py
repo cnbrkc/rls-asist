@@ -17,10 +17,9 @@ from config import (
     COOLDOWN_FREE_TIER_YOK, IP_BAN_KORUMA, QUOTA_RETRY_DEFAULT,
     model_arama_destekliyor_mu
 )
-from utils import (
-    guvenli_json_yukle, sesi_hizlandir, temp_dosya_temizle,
-    video_analiz_promptunu_olustur
-)
+from utils import guvenli_json_yukle
+from media import sesi_hizlandir, temp_dosya_temizle
+from prompts import video_analiz_promptunu_olustur
 
 class SmartRouter:
     def __init__(self) -> None:
