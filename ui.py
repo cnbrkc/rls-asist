@@ -1,16 +1,21 @@
 import streamlit as st
 import streamlit.components.v1 as components
 import os
-import uuid
 import traceback
 import re
-import tempfile
 
 # Kendi modüllerimiz
-from config import API_KEYS, SES_HIZ_CARpanI, MAX_INPUT_KARAKTER, METIN_MODELLERI
-from utils import markdown_temizle, kapak_basliklarini_formatla
+from config import (
+    API_KEYS, SES_HIZ_CARPANI, MAX_INPUT_KARAKTER, METIN_MODELLERI,
+    VIDEO_FORMATLARI, MAX_VIDEO_BOYUT, MIN_SURE_SANIYE, MAX_SURE_SANIYE,
+    TON_ETIKETLERI, TON_EGLENCE, TON_DENGELI, TON_BILGI, TON_TEKNIK,
+    METIN_SCHEMA,
+)
 from storage import kayit_ekle
-from media import eski_ses_dosyalarini_temizle, temp_dosya_temizle, video_suresini_al, video_ve_sesi_birlestir
+from media import (
+    eski_ses_dosyalarini_temizle, temp_dosya_temizle, video_suresini_al,
+    video_ve_sesi_birlestir, gecici_dosya_yolu, gecici_ses_yolu,
+)
 from prompts import prompt_dosyasini_oku, kurallari_oku, sistem_talimati_olustur
 from router import SmartRouter
 from ui_sidebar import render_sidebar
@@ -71,11 +76,11 @@ render_sidebar()
 # ============================================================
 uploaded_video = st.file_uploader(
     "🎥 Referans Video (Süre otomatik algılanır)",
-    type=['mp4', 'mov', 'webm'],
+    type=VIDEO_FORMATLARI,
     help="Videoyu yüklersiniz; süre otomatik tespit edilir ve ses buna göre ayarlanır.",
     key="video_uploader"
 )
-video_buyuk = uploaded_video is not None and uploaded_video.size > 50 * 1024 * 1024
+video_buyuk = uploaded_video is not None and uploaded_video.size > MAX_VIDEO_BOYUT
 
 sure_saniye = 30  # Varsayılan
 
@@ -85,7 +90,7 @@ if uploaded_video is not None:
         st.warning("⚠️ Video 50 MB üstü! Sıkıştırmanız önerilir.")
 
     # Hızlı süre tespiti
-    temp_check_path = os.path.join(tempfile.gettempdir(), f"check_{uuid.uuid4().hex[:8]}.mp4")
+    temp_check_path = gecici_dosya_yolu("check", "mp4")
     try:
         with open(temp_check_path, "wb") as f:
             f.write(uploaded_video.getvalue())
@@ -100,7 +105,7 @@ if uploaded_video is not None:
         st.success(f"⏱️ Otomatik tespit edilen video süresi: {sure_saniye} saniye")
     else:
         st.warning("⚠️ Videonun süresi otomatik okunamadı! Lütfen videonun süresini saniye cinsinden belirtin:")
-        sure_saniye = int(st.number_input("⏱️ Manuel Süre Girişi (sn)", min_value=1, max_value=300, value=30, step=1, key="manual_sure_input"))
+        sure_saniye = int(st.number_input("⏱️ Manuel Süre Girişi (sn)", min_value=MIN_SURE_SANIYE, max_value=MAX_SURE_SANIYE, value=30, step=1, key="manual_sure_input"))
 
 c1, c2 = st.columns(2)
 with c1:
@@ -118,10 +123,13 @@ with c2:
         key="metin_uretim_notlari"
     )
 
+# TON radio: Anahtar=TON_*, Etiket=emoji + açıklama
+ton_anahtarlari = [TON_EGLENCE, TON_DENGELI, TON_BILGI, TON_TEKNIK]
 icerik_tonu = st.radio(
     "🎯 İçerik Tonu",
-    ["🎭 Eğlence Ağırlıklı (%25 bilgi)", "⚖️ Dengeli (%50 bilgi)", "🧠 Bilgi Ağırlıklı (%75 bilgi)", "📊 Teknik Odaklı (%90 bilgi)"],
+    ton_anahtarlari,
     index=1,
+    format_func=lambda k: TON_ETIKETLERI[k],
     horizontal=True,
     key="icerik_tonu"
 )
@@ -182,11 +190,17 @@ if buton_tiklandi and uploaded_video is not None:
 
     st.warning("⚡ **Üretim devam ediyor — bu sayfadan ayrılmayın!** Ekran açık kalacak.", icon="⚠️")
 
+    # Önceki üretimden kalan geçici video dosyasını temizle
+    if st.session_state.sonuc and st.session_state.sonuc.get("temp_input_video"):
+        eski_input = st.session_state.sonuc["temp_input_video"]
+        if os.path.exists(eski_input):
+            temp_dosya_temizle(eski_input)
+
     st.session_state.log_satirlari = []
     log_ekle("🚀 Üretim başladı...")
     ilerlemeyi_guncelle(0, 4, "Başlatılıyor...")
 
-    temp_input_video = os.path.join(tempfile.gettempdir(), f"input_{uuid.uuid4().hex[:8]}.mp4")
+    temp_input_video = gecici_dosya_yolu("input", "mp4")
     with open(temp_input_video, "wb") as f:
         f.write(uploaded_video.getvalue())
 
@@ -217,24 +231,7 @@ if buton_tiklandi and uploaded_video is not None:
         ilerlemeyi_guncelle(2, 4, "✍️ Metin üretiliyor...")
         system_prompt = kurallari_oku() + sistem_talimati_olustur(sure_saniye, icerik_tonu)
 
-        response_schema = {
-            "type": "OBJECT",
-            "properties": {
-                "beyin_firtinasi": {"type": "STRING", "description": "Seslendirme metnini yazmadan ÖNCE buraya stratejini yaz. Videodaki görsel akışa göre 4 vuruşu nasıl eşleştireceğini planla."},
-                "veri_kilitleme": {"type": "STRING", "description": "Video analizinden ve internet aramasından gelen kesin rakamları buraya listele."},
-                "oz_elestiri": {"type": "STRING", "description": "Kendi planını kurallar.txt'ye göre denetle."},
-                "seslendirme_metni": {"type": "STRING"},
-                "reels_aciklamasi": {"type": "STRING"},
-                "reels_hashtagleri": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "Reels açıklaması için 5 adet ilgili hashtag."},
-                "kapak_basliklari": {
-                    "type": "ARRAY",
-                    "items": {"type": "OBJECT", "properties": {"ana": {"type": "STRING"}, "alt": {"type": "STRING"}}, "required": ["ana", "alt"]},
-                },
-            },
-            "required": ["beyin_firtinasi", "veri_kilitleme", "oz_elestiri", "seslendirme_metni", "reels_aciklamasi", "reels_hashtagleri", "kapak_basliklari"],
-        }
-
-        veri, kullanilan_metin_modeli = router.metin_uret(video_icerigi, system_prompt, response_schema, log_ekle, arama_kullan=False)
+        veri, kullanilan_metin_modeli = router.metin_uret(video_icerigi, system_prompt, METIN_SCHEMA, log_ekle, arama_kullan=False)
 
         # ADIM 3: Threads Üretimi
         ilerlemeyi_guncelle(3, 4, "🧵 Threads üretiliyor...")
@@ -262,13 +259,13 @@ if buton_tiklandi and uploaded_video is not None:
         # ADIM 4: Ses Üretimi
         ilerlemeyi_guncelle(4, 4, "🎙️ Ses üretiliyor...")
         secilen_ses_ingilizce = st.session_state.ses_secimi.split(" ")[0]
-        ses_dosyasi = os.path.join(tempfile.gettempdir(), f"ses_{uuid.uuid4().hex[:8]}.wav")
+        ses_dosyasi = gecici_ses_yolu()
         ses_basarili, kullanilan_ses_modeli = router.ses_uret(
             veri["seslendirme_metni"],
             secilen_ses_ingilizce,
             ses_dosyasi,
             log_ekle,
-            hiz_carpani=SES_HIZ_CARpanI
+            hiz_carpani=SES_HIZ_CARPANI
         )
 
         if ses_basarili and os.path.exists(ses_dosyasi):
@@ -276,7 +273,7 @@ if buton_tiklandi and uploaded_video is not None:
 
         # VİDEO + SES BİRLEŞTİRME
         log_ekle("🎬 Videoya AI sesi ekleniyor...")
-        output_video_path = os.path.join(tempfile.gettempdir(), f"output_{uuid.uuid4().hex[:8]}.mp4")
+        output_video_path = gecici_dosya_yolu("output", "mp4")
 
         render_basarili = video_ve_sesi_birlestir(
             temp_input_video,
@@ -323,6 +320,7 @@ if buton_tiklandi and uploaded_video is not None:
             "kullanilan_ses_modeli": kullanilan_ses_modeli,
             "kullanilan_threads_modeli": kullanilan_threads_modeli,
             "final_video": final_video_yolu,
+            "temp_input_video": temp_input_video,
         }
         st.session_state._sonuc_versiyon += 1
 
@@ -337,8 +335,6 @@ if buton_tiklandi and uploaded_video is not None:
         st.session_state.sonuc = None
         ilerlemeyi_guncelle(0, 4, "❌ Hata!")
         st.error("Hata oluştu. Logu kopyalayın.")
-    finally:
-        temp_dosya_temizle(temp_input_video)
 
 # ============================================================
 # SONUÇLARI GÖSTER
