@@ -1,182 +1,447 @@
-🏎️ otoXtra Proje Mimarisi ve İşleyiş Şeması
-1. Proje Amacı
+================================================================
+  otoXtra — MİMARİ ŞEMA & KOD ANALİZİ  (v2.0)
+  Son güncelleme: 2026-07-30
+================================================================
 
-otoXtra, kullanıcının yüklediği bir referans videosunu (veya manuel analiz notlarını) kullanarak:
-
-    Reels açıklaması (hashtag'lerle birlikte)
-
-    Kapak başlıkları (5 alternatif)
-
-    Threads/X gönderisi (sohbet havasında kısa metin)
-
-    Seslendirme metni ve TTS ses dosyası (hızlandırılmış)
-    otomatik olarak üreten bir Streamlit uygulamasıdır.
-
-Google Gemini API (çoklu anahtar desteği) kullanır, akıllı hata yönetimi (cooldown/ban) ile kesintisiz çalışmayı hedefler.
-2. Dosya Yapısı ve Sorumluluklar
-text
+════════════════════════════════════════════════════════════════
+  1. KLASÖR / DOSYA YAPISI
+════════════════════════════════════════════════════════════════
 
 rls-asist/
-├── app.py                 # Uygulama giriş noktası (sadece ui'yi import eder)
-├── config.py              # Tüm sabitler, API anahtarları, model listeleri, cooldown süreleri
-├── utils.py               # Yardımcı fonksiyonlar (dosya/JSON işlemleri, ses hızlandırma, kayıt yönetimi, prompt oluşturma)
-├── router.py              # SmartRouter sınıfı (API istekleri, hata yönetimi, model rotalama)
-├── ui.py                  # Streamlit arayüzü (sidebar, ana form, sonuç gösterimi, loglar, yeniden ses üretme)
-│
-├── guncellik_talimati.txt # Prompt bileşeni: güncel tarih bilgisi
-├── kurallar.txt           # Temel kurallar ve kısıtlamalar
-├── sistem_talimati.txt    # Sistem talimatı (kelime sayısı, ton, bilgi oranı)
-├── threads_promptu.txt    # Threads dönüşüm promptu
-├── video_analiz_promptu.txt # Video analiz promptu
-│
-├── requirements.txt       # Python bağımlılıkları
-└── packages.txt           # Sistem paketleri (ör. ffmpeg)
-
-3. Modüller Arası İlişki (Bağımlılık Grafiği)
-
-    ui.py kullanıcı etkileşimini yönetir, router ve utils fonksiyonlarını çağırır.
-
-    router.py API çağrılarını gerçekleştirir, hata durumlarında ban/cooldown mekanizmasını çalıştırır.
-
-    utils.py saf yardımcı fonksiyonları içerir (dosya okuma, JSON parse, ses işleme, kayıt yönetimi).
-
-    config.py tüm sabit değerleri tek bir merkezden sağlar.
-
-4. Veri Akışı (İşlem Adımları)
-4.1. Kullanıcı Girdileri
-
-    Video dosyası (isteğe bağlı, mp4/mov/webm) veya manuel analiz notları
-
-    Analiz notları (video varsa ek ipuçları, yoksa tam analiz metni)
-
-    Üretim notları (özel talimatlar, yasaklar, vurgular)
-
-    Hedef süre (saniye, 5-180)
-
-    İçerik tonu (Eğlence, Dengeli, Bilgi, Teknik)
-
-    Ses seçimi (11 farklı TTS sesi)
-
-4.2. Üretim Akışı (4 Adım)
-Adım	Açıklama	Hangi Modül/Model
-1️⃣ Video Analiz	Video varsa Gemini ile analiz edilir; yoksa manuel notlar kullanılır. Google Search aracı aktif.	router.video_analiz_et() → Video Analiz Modelleri
-2️⃣ Metin Üretimi	Video analizi + üretim notları + sistem talimatı → JSON çıktısı (beyin fırtınası, veri kilitleme, öz eleştiri, ses metni, reels açıklaması, hashtag'ler, kapak başlıkları). Arama kapalı.	router.metin_uret() → Metin Modelleri
-3️⃣ Threads Üretimi	Reels açıklamasından sohbet havasında kısa metin üretilir. Hata durumunda fallback.	router.metin_uret() (farklı prompt) → Metin Modelleri
-4️⃣ Ses Üretimi	Seslendirme metni TTS'e gönderilir, çıkan WAV hızlandırılır (ffmpeg atempo).	router.ses_uret() → Ses Modelleri
-4.3. Sonuçların Gösterimi
-
-    Ses oynatıcı + indirme butonu
-
-    Reels açıklaması (hashtag'lerle), kapak başlıkları, Threads metni
-
-    AI'nın iç monoloğu (beyin fırtınası, veri kilitleme, öz eleştiri)
-
-    Seslendirme metni (düzenlenebilir ve yeniden ses üretilebilir)
-
-5. Akıllı Router (SmartRouter) Çalışma Prensibi
-5.1. Amaç
-
-    Birden fazla API anahtarını (farklı e‑posta hesaplarına ait) yönetir.
-
-    Model bazında, anahtar bazında veya kombinasyon bazında cooldown/ban uygular.
-
-    Hata türlerine göre farklı stratejiler uygular:
-
-        free_tier_yok (limit: 0) → model tamamen 7 gün banlanır.
-
-        quota (429) → anahtar belirli bir süre banlanır (retryDelay varsa onu kullanır).
-
-        sunucu hatası (503) → kombinasyon 15 dakika banlanır.
-
-        model bulunamadı (404) → model tüm anahtarlar için 24 saat banlanır.
-
-        Diğer hatalar → kombinasyon 5 dakika banlanır.
-
-5.2. Rotasyon Mantığı
-
-    Verilen model listesinde sırayla dolaşır.
-
-    Her model için tüm anahtarları dener (ban kontrolü yaparak).
-
-    Başarılı olan ilk kombinasyon kullanılır.
-
-    Tüm kombinasyonlar başarısız olursa hata fırlatılır.
-
-5.3. Blacklist Yapısı
-
-    st.session_state.blacklist sözlüğünde anahtarlar:
-
-        *+model : model bazlı ban
-
-        mail+* : anahtar bazlı ban
-
-        mail+model : spesifik kombinasyon banı
-
-    Değer olarak bitiş zamanı (timestamp) tutulur.
-
-6. Önemli Sabitler ve Değişkenler (config.py)
-Değişken	Açıklama	Varsayılan
-API_KEYS	Streamlit secrets'tan okunan dict	{"mail1":"key1", ...}
-VIDEO_ANALIZ_MODELLERI	Video analiz için kullanılacak modeller	["gemini-3.6-flash", "gemini-2.5-flash"]
-METIN_MODELLERI	Metin üretimi için modeller	["gemini-3.6-flash", "gemini-2.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
-SES_MODELLERI	TTS için modeller	["gemini-2.5-flash-preview-tts"]
-MAX_INPUT_KARAKTER	Giriş metni maksimum karakter	900.000
-SES_HIZ_CARpanI	TTS çıktısının hızlandırma oranı	1.2 (%20 hızlı)
-MAX_KAYIT	Geçmişte tutulacak maksimum kayıt sayısı	5
-Cooldown süreleri	Çeşitli hata türleri için bekleme süreleri	(bkz. config.py)
-7. Prompt Sistemi (Dış Dosyalar)
-
-    guncellik_talimati.txt: Güncel tarihi formata ekler.
-
-    kurallar.txt: Temel yasaklar, yapılandırıcı kurallar.
-
-    sistem_talimati.txt: Kelime sayısı, ton, bilgi/eğlence oranı, güncellik talimatı.
-
-    threads_promptu.txt: Instagram açıklamasını Threads/X formatına dönüştürür.
-
-    video_analiz_promptu.txt: Video analizi için özel prompt (görsel ve metin girdisi).
-
-Tüm bu dosyalar utils.prompt_dosyasini_oku() ile okunur ve format() ile değişkenler yerleştirilir.
-8. Kayıt ve Geçmiş Sistemi
-
-    kayitlar.json dosyasında son 5 üretim saklanır.
-
-    Her kayıt: tarih, seslendirme metni, reels açıklaması, hashtag'ler, kapak başlıkları, threads açıklaması, ses adı, süre.
-
-    Sidebar'da geçmiş kayıtlar buton olarak listelenir; tıklanınca sonuçlar geri yüklenir (ses dosyası hariç).
-
-    "Tüm Geçmişi Sil" butonu ile dosya temizlenir.
-
-9. Hata Yönetimi ve Loglama
-
-    Tüm işlem adımları log_ekle() ile kullanıcıya gösterilir (kod penceresinde).
-
-    Hata durumunda traceback.format_exc() alınır, API anahtarları gizlenir (***) ve loga eklenir.
-
-    Kullanıcıya hata mesajı gösterilir, logları kopyalaması istenir.
-
-10. Performans ve Güvenlik Notları
-
-    ffmpeg gereklidir (ses hızlandırma için). Sunucuda kurulu olmalıdır.
-
-    Streamlit secrets kullanılır, API anahtarları .streamlit/secrets.toml içinde saklanır.
-
-    st.stop() kullanımı doğru akışı keser; hata durumlarında kullanılır.
-
-    Geçici ses dosyaları 24 saat sonra otomatik temizlenir.
-
-    Video boyutu 20 MB ile sınırlıdır (Streamlit file_uploader varsayılanı).
-
-11. Geliştirme ve Genişletme İpuçları
-
-    Yeni bir model eklemek için config.py'deki model listelerine ekleyin.
-
-    Yeni bir hata türü eklemek için router._parse_hata() metodunu genişletin.
-
-    Yeni bir prompt dosyası eklemek için dosyayı ana klasöre koyun ve utils.prompt_dosyasini_oku() ile çağırın.
-
-    Farklı bir TTS sesi eklemek için ses_secimi selectbox'una ekleyin (İngilizce isimlerle).
-
-    Yeni bir çıktı alanı (ör. YouTube açıklaması) eklemek için response_schema'yı ve UI gösterimini genişletin.
-
-Bu metin, projeyi anlamak, geliştirmek veya yapay zeka asistanlarına açıklamak için kullanılabilir. Tüm dosyaların işlevleri, veri akışı ve akıllı router mekanizması açıkça belirtilmiştir.
+├── app.py                    ← Giriş noktası (3 satır)
+├── config.py                 ← Tüm sabitler & ayarlar (50 satır)
+├── utils.py                  ← Genel yardımcılar: JSON parse, metin temizleme (46 satır)
+├── prompts.py                ← Prompt okuma & oluşturma (69 satır)
+├── media.py                  ← Ses/video işleme: ffmpeg, hızlandırma, birleştirme (242 satır)
+├── storage.py                ← Üretim kayıt yönetimi: yükle/kaydet/ekle/sil (49 satır)
+├── router.py                 ← SmartRouter: API key/model rotasyon, hata yönetimi (215 satır)
+├── ui.py                     ← Ana Streamlit arayüzü & üretim akışı (347 satır)
+├── ui_sidebar.py             ← Sidebar: ses seçimi, key'ler, banlar, geçmiş (79 satır)
+├── ui_results.py             ← Sonuç gösterimi: video, ses, metinler, yeniden üret (199 satır)
+├── prompts/
+│   ├── sistem_talimati.txt   ← Sistem talimatı şablonu (format değişkenleri alır)
+│   ├── kurallar.txt          ← Kurallar şablonu (kelime hesaplama sabitleri alır)
+│   ├── guncellik_talimati.txt← Güncellik talimatı şablonu (tarih alır)
+│   ├── threads_promptu.txt   ← Threads üretim talimatı
+│   └── video_analiz_promptu.txt ← Video analiz promptu şablonu
+├── static/
+│   └── manifest.json         ← PWA manifest (otoXtra mobil uygulama)
+├── .gitignore                ← __pycache__/ hariç
+├── requirements.txt          ← Python paketleri
+├── packages.txt              ← Sistem paketleri (ffmpeg)
+├── runtime.txt               ← Python sürümü (3.11.11)
+└── README.md
+
+
+════════════════════════════════════════════════════════════════
+  2. BAĞIMLILIK GRAFİĞİ (IMPORT AĞACI)
+════════════════════════════════════════════════════════════════
+
+  app.py
+    └── ui
+
+  ui.py
+    ├── config        (API_KEYS, SES_HIZ_CARpanI, MAX_INPUT_KARAKTER, METIN_MODELLERI)
+    ├── utils         (markdown_temizle, kapak_basliklarini_formatla)  ⚠️ KULLANILMIYOR
+    ├── storage       (kayit_ekle)
+    ├── media         (eski_ses_dosyalarini_temizle, temp_dosya_temizle, video_suresini_al, video_ve_sesi_birlestir)
+    ├── prompts       (prompt_dosyasini_oku, kurallari_oku, sistem_talimati_olustur)
+    ├── router        (SmartRouter)
+    ├── ui_sidebar    (render_sidebar)
+    └── ui_results    (render_results)
+
+  ui_sidebar.py
+    ├── config        (API_KEYS)
+    └── storage       (kayitlari_yukle, tum_kayitlari_sil)
+
+  ui_results.py
+    ├── config        (API_KEYS ⚠️ KULLANILMIYOR, SES_HIZ_CARpanI)
+    ├── utils         (markdown_temizle, kapak_basliklarini_formatla)
+    ├── storage       (tum_kayitlari_sil)
+    ├── media         (temp_dosya_temizle, video_ve_sesi_birlestir ⚠️ KULLANILMIYOR)
+    └── router        (parametre olarak alır, import etmez)
+
+  router.py
+    ├── config        (API_KEYS, METIN_MODELLERI, SES_MODELLERI, VIDEO_ANALIZ_MODELLERI,
+                       COOLDOWN_*, IP_BAN_KORUMA, QUOTA_RETRY_DEFAULT,
+                       model_arama_destekliyor_mu)
+    ├── utils         (guvenli_json_yukle)
+    ├── media         (sesi_hizlandir, temp_dosya_temizle)
+    └── prompts       (video_analiz_promptunu_olustur)
+
+  prompts.py
+    └── config        (guncel_tarih_metni, KELIME_HIZI_ORANI, KELIME_YUVARLAMA)
+
+  media.py
+    └── config        (SES_OMRU_SANIYE)
+
+  storage.py
+    └── config        (KAYIT_DOSYASI, MAX_KAYIT)
+
+  utils.py
+    └── (bağımsız — sadece standart kütüphane)
+
+  config.py
+    └── (bağımsız — sadece streamlit + datetime)
+
+  ✅ DÖNGÜSEL İMPORT YOK — Tüm bağımlılıklar tek yönlü
+
+
+════════════════════════════════════════════════════════════════
+  3. SABİTLER TABLOSU (config.py)
+════════════════════════════════════════════════════════════════
+
+  Kategori            Sabit                    Değer          Açıklama
+  ──────────────────  ────────────────────────  ────────────  ──────────────────────────────
+  API Key'ler         API_KEYS                 {dict}         Streamlit secrets'tan
+  Model Listeleri     VIDEO_ANALIZ_MODELLERI   [...]          Video analiz modelleri
+                      METIN_MODELLERI          [...]          Metin üretim modelleri
+                      SES_MODELLERI            [...]          TTS ses modelleri
+  Cooldown            COOLDOWN_SUNUCU          900            15 dakika
+                      COOLDOWN_BULUNAMADI      86400          24 saat
+                      COOLDOWN_DIGER           300            5 dakika
+                      COOLDOWN_FREE_TIER_YOK   604800         7 gün
+  Koruma              IP_BAN_KORUMA            1.0            Saniye (key arası bekleme)
+                      QUOTA_RETRY_DEFAULT      60             Kota sonrası varsayılan bekleme
+  Kelime Hesaplama    KELIME_HIZI_ORANI        2.4            TTS Türkçe kelime/saniye oranı
+                      KELIME_YUVARLAMA         5              En yakın 5'in katına yuvarla
+  Diğer               MAX_INPUT_KARAKTER       900_000        Maks. girdi karakteri
+                      KAYIT_DOSYASI            "kayitlar.json" Kayıt dosyası adı
+                      MAX_KAYIT                5              Maks. kayıt sayısı
+                      SES_OMRU_SANIYE          86400          24 saat (temp ses ömrü)
+                      SES_HIZ_CARpanI          1.2            Ses hızlandırma çarpanı
+  Fonksiyonlar        guncel_tarih_metni()     → str          "30 Temmuz 2026" formatında
+                      model_arama_destekliyor_mu() → bool     Google Search destekliyor mu?
+
+
+════════════════════════════════════════════════════════════════
+  4. FONKSİYON HARİTASI
+════════════════════════════════════════════════════════════════
+
+  config.py
+  ├── guncel_tarih_metni()            → str          Türkçe tarih üretir
+  └── model_arama_destekliyor_mu()    → bool         Google Search desteği kontrolü
+
+  utils.py
+  ├── markdown_temizle(metin)         → str          Markdown işaretlerini temizle
+  ├── kapak_basliklarini_formatla()   → str          Kapak başlıklarını formatla
+  └── guvenli_json_yukle(response)    → dict         Güvenli JSON parse (3 kademeli)
+
+  prompts.py
+  ├── prompt_dosyasini_oku(dosya_adi) → str          prompts/ klasöründen oku
+  ├── kurallari_oku()                 → str          kurallar.txt + config sabitleri
+  ├── guncellik_talimati_uret()       → str          guncellik_talimati.txt + tarih
+  ├── video_analiz_promptunu_olustur(ek_notlar, sure) → str
+  └── sistem_talimati_olustur(sure, ton) → str       Kelime hedefi + ton + güncellik
+
+  media.py
+  ├── _ffmpeg_yolu_bul()              → str          imageio-ffmpeg veya sistem PATH
+  ├── FFMPEG_BIN                      (modül sabiti) Bulunan ffmpeg yolu
+  ├── temp_dosya_temizle(yol)         → bool         Geçici dosya sil
+  ├── eski_ses_dosyalarini_temizle()  → None         24 saatten eski sesleri sil
+  ├── sesi_hizlandir(giris, cikti, hiz, log) → bool  ffmpeg atempo ile hızlandır
+  ├── video_suresini_al(yol)          → float        cv2 ile video süresi
+  ├── _ses_suresini_al(yol)           → float        wave ile ses süresi
+  └── video_ve_sesi_birlestir(v, s, o, log) → bool   2K upscale + keskinleştirme + birleştirme
+
+  storage.py
+  ├── kayitlari_yukle()               → List[dict]   kayitlar.json'dan yükle
+  ├── kayitlari_kaydet(kayitlar)      → None         kayitlar.json'a kaydet
+  ├── kayit_ekle(uretim_verisi)       → None         Yeni kayıt ekle (MAX_KAYIT sınırı)
+  └── tum_kayitlari_sil()             → None         kayitlar.json'ı sil
+
+  router.py — SmartRouter sınıfı
+  ├── __init__()                      → None         blacklist session_state başlatma
+  ├── _is_banned(mail, model)         → bool         Ban kontrolü
+  ├── _ban(mail, model, cooldown, scope) → None      Ban uygulama
+  ├── _retry_delay_cikar(hata_metni)  → int          Hata mesajından bekleme süresi çıkar
+  ├── _parse_hata(hata_metni)         → Tuple        Hata sınıflandırma
+  ├── _handle_hata(mail, model, hata, log) → str     Hata aksiyon (devam/break_model)
+  ├── _make_request(modeller, icerik, config, log) → (response, info)
+  ├── metin_uret(icerik, prompt, schema, log, ...) → (dict, str)
+  ├── ses_uret(metin, ses, dosya, log, hiz) → (bool, str)
+  └── video_analiz_et(bytes, mime, notlar, sure, log) → (str, str)
+
+  ui_sidebar.py
+  └── render_sidebar()                → None         Sol sidebar'ı çiz
+
+  ui_results.py
+  └── render_results(log_ekle, router) → None        Sonuçları göster
+
+
+════════════════════════════════════════════════════════════════
+  5. VERİ AKIŞI (ÜRETİM PIPELINE)
+════════════════════════════════════════════════════════════════
+
+  Kullanıcı video yükler
+       │
+       ▼
+  [ui.py] video_suresini_al() → Süre tespiti (otomatik / manuel)
+       │
+       ▼
+  ┌─ ADIM 1: Video Analiz ──────────────────────────────────┐
+  │  router.video_analiz_et()                               │
+  │    → prompts: video_analiz_promptunu_olustur()          │
+  │       → guncellik_talimati_uret()                       │
+  │    → Gemini API (VIDEO_ANALIZ_MODELLERI)                │
+  │    → analiz_metni (str)                                 │
+  └─────────────────────────────────────────────────────────┘
+       │
+       ▼
+  ┌─ ADIM 2: Metin Üretimi ─────────────────────────────────┐
+  │  kurallari_oku() + sistem_talimati_olustur(sure, ton)   │
+  │    → prompts: kelime hesaplama (config sabitleri)       │
+  │    → prompts: ton → bilgi_orani (Eğlence/Bilgi/...)    │
+  │  router.metin_uret()                                    │
+  │    → Gemini API (METIN_MODELLERI, JSON schema)         │
+  │    → utils: guvenli_json_yukle()                        │
+  │    → veri dict (seslendirme, reels, kapak, hashtag)     │
+  └─────────────────────────────────────────────────────────┘
+       │
+       ▼
+  ┌─ ADIM 3: Threads Üretimi ───────────────────────────────┐
+  │  prompt_dosyasini_oku("threads_promptu.txt")            │
+  │  router.metin_uret(arama_kullan=False)                  │
+  │    → veri["threads_aciklamasi"]                         │
+  │    → Hata durumunda: reels_aciklamasi fallback          │
+  └─────────────────────────────────────────────────────────┘
+       │
+       ▼
+  ┌─ ADIM 4: Ses Üretimi ──────────────────────────────────┐
+  │  router.ses_uret(metin, ses, dosya, hiz)               │
+  │    → Gemini API (SES_MODELLERI, AUDIO modality)        │
+  │    → WAV dosyası yazımı (router.py içinde)              │
+  │    → media: sesi_hizlandir() (ffmpeg atempo)            │
+  └─────────────────────────────────────────────────────────┘
+       │
+       ▼
+  ┌─ VİDEO + SES BİRLEŞTİRME ──────────────────────────────┐
+  │  media: video_ve_sesi_birlestir()                       │
+  │    → 2K upscale (lanczos, zaten 2K+ ise atla)          │
+  │    → Keskinleştirme (unsharp filter)                    │
+  │    → Video yavaşlatma (sese uyum, max 0.9x)            │
+  │    → Fallback: upscale olmadan tekrar dene              │
+  └─────────────────────────────────────────────────────────┘
+       │
+       ▼
+  [ui_results.py] Sonuçları göster
+       │
+       ├── 📺 Video (indir + paylaş)
+       ├── 🎧 Ses (ayrı indir)
+       ├── 📝 Metinler (Reels / Kapak / Threads)
+       ├── 🧠 AI Düşünme Zinciri (beyin fırtınası / veri / öz eleştiri)
+       └── 🔄 Yeniden Ses Üret (metin düzenle → tekrar TTS)
+
+
+════════════════════════════════════════════════════════════════
+  6. HEDEF KELİME HESAPLAMA AKIŞI
+════════════════════════════════════════════════════════════════
+
+  Kullanıcı video süresi girer (örn: 30 saniye)
+       │
+       ▼
+  config.py: KELIME_HIZI_ORANI = 2.4, KELIME_YUVARLAMA = 5
+       │
+       ▼
+  prompts.py: sistem_talimati_olustur()
+    hedef_kelime = round(sure * 2.4 / 5) * 5
+    örnek: 30 × 2.4 = 72 → round(72/5)*5 = 70
+    min_kelime = max(5, int(70 × 0.85)) = 59
+    max_kelime = int(70 × 1.1) = 77
+       │
+       ▼
+  prompts/sistem_talimati.txt:
+    "Hedef kelime sayısı: {kelime_sayisi} kelime"
+    "video_süresi × {kelime_hizi_orani} → en yakın {kelime_yuvarlama}'in katı"
+       │
+       ▼
+  prompts/kurallar.txt:
+    "Kelime sayısı verilmemişse: video_süresi × {kelime_hizi_orani}
+     → en yakın {kelime_yuvarlama}'in katına yuvarla."
+
+  ✅ TEK KAYNAK: KELIME_HIZI_ORANI ve KELIME_YUVARLAMA sadece config.py'de
+     tanımlıdır. Tüm .txt dosyaları şablon değişkenleri alır.
+
+
+════════════════════════════════════════════════════════════════
+  7. SMARTROUTER KARA LİSTE (BAN) SİSTEMİ
+════════════════════════════════════════════════════════════════
+
+  Ban anahtarı formatı:  "{mail}+{model}" veya "*+{model}" veya "{mail}+*"
+  Ban değeri:            time.time() + cooldown (epoch)
+
+  Kapsam (scope):
+  ├── "model"  → TÜM key'ler için (model bazlı hata, 404, free tier yok)
+  ├── "key"    → Sadece o key (şu an kullanılmıyor)
+  └── "combo"  → key+model kombinasyonu (kota, 503, genel hata)
+
+  Hata sınıflandırma:
+  ├── "limit: 0"       → free_tier_yok  → 7 gün ban (model scope)
+  ├── 429 / quota      → Kota           → retryDelay kadar ban (combo scope)
+  ├── 503 / unavailable → Sunucu hatası  → 15 dk ban (combo scope)
+  ├── 404 / not_found  → Model yok      → 24 saat ban (model scope)
+  └── Diğer            → Genel          → 5 dk ban (combo scope)
+
+  Döngü: model_listesi → key'ler → hata → ban → sonraki key/model
+
+
+════════════════════════════════════════════════════════════════
+  8. PWA & MOBİL DESTEK
+════════════════════════════════════════════════════════════════
+
+  ├── static/manifest.json        → PWA manifest (standalone, portrait)
+  ├── Wake Lock API               → Üretim sırasında ekranı açık tut
+  ├── beforeunload                → Sayfadan ayrılma uyarısı
+  ├── Web Share API               → iOS'ta "Galeriye Kaydet" desteği
+  └── apple-mobile-web-app-capable → Ana ekrana ekleme desteği
+
+
+════════════════════════════════════════════════════════════════
+  9. KOD ANALİZİ — BULGULAR VE ÖNERİLER
+════════════════════════════════════════════════════════════════
+
+  ┌──────────────────────────────────────────────────────────┐
+  │  🔴 YÜKSEK RİSKLİ SORUNLAR (HATA VERECEK)               │
+  └──────────────────────────────────────────────────────────┘
+
+  B1 — ffmpeg Fallback Komutu HATALI Argüman Sırası
+  Dosya: media.py, satır 206-224
+  Sorun: Fallback komut oluşturulurken insert() ile "-preset fast -crf 23"
+         ekleneceğine "-c:v fast -crf 23 libx264" oluşuyor.
+         "fast" video codec olarak geçirilir → ffmpeg HATA VERİR.
+  Çözüm: Insert yerine düz liste inşası:
+    fallback_komut += ["-c:v", "libx264", "-preset", "fast", "-crf", "23"]
+
+  B2 — "Yeniden Ses ve Video Üret" Butonu SADECE Ses Üretir
+  Dosya: ui_results.py, satır 168-198
+  Sorun: Buton "Ses ve Video" diyor ama sadece ses_uret() çağırıyor.
+         video_ve_sesi_birlestir() çağrılmıyor.
+         video_ve_sesi_birlestir import edilmiş ama kullanılmıyor.
+  Çözüm: Ya video birleştirmeyi ekle ya da buton yazısını "Ses Üret" yap.
+
+
+  ┌──────────────────────────────────────────────────────────┐
+  │  🟡 ORTA RİSKLİ SORUNLAR (KALİTE / BAKIM)               │
+  └──────────────────────────────────────────────────────────┘
+
+  U3 — ui.py Kullanılmayan Import
+  Dosya: ui.py, satır 11
+  Sorun: markdown_temizle, kapak_basliklarini_formatla import edilmiş
+         ama ui.py'de hiç kullanılmıyor (ui_results.py kullanıyor).
+  Çözüm: Import satırını sil.
+
+  U4 — ui_results.py Kullanılmayan Import
+  Dosya: ui_results.py, satır 13
+  Sorun: video_ve_sesi_birlestir import edilmiş ama hiç çağrılmıyor.
+         (B2 ile ilişkili — ya kullanılmalı ya silinmeli)
+  Çözüm: B2 düzeltilirse kullan, yoksa sil.
+
+  U5 — ui_results.py Gereksiz API_KEYS Import
+  Dosya: ui_results.py, satır 10
+  Sorun: API_KEYS import edilmiş ama dosyada hiç kullanılmıyor.
+  Çözüm: Import'tan kaldır.
+
+  I2 — icerik_tonu Karşılaştırması Kırılgan
+  Dosya: prompts.py, satır 49-56
+  Sorun: "Eğlence Ağırlıklı" in icerik_tonu — emoji değişirse bozulur.
+  Çözüm: Enum benzeri anahtarlarla karşılaştır (config.py'de sabit tanımla).
+
+  I3 — storage.py Tarih Formatı Locale Bağımlı
+  Dosya: storage.py, satır 29
+  Sorun: %B sistem diline göre İngilizce/Türkçe ay adı üretir.
+         İngilizce sunucuda "March" yerine "Mart" beklenir.
+  Çözüm: guncel_tarih_metni() kullan.
+
+  D1 — WAV Yazma Kodu Tekrarı
+  Dosya: router.py, satır 173-177 ve 182-186
+  Sorun: Aynı 4 satırlık WAV yazma bloğu iki kere tekrar ediyor.
+  Çözüm: media.py'ye wav_yaz() yardımcı fonksiyon ekle.
+
+  H8 — Ses Seçenekleri Hardcoded
+  Dosya: ui_sidebar.py, satır 15-22
+  Sorun: 11 ses seçeneği ui_sidebar.py'de sabit yazılmış.
+  Çözüm: config.py'ye SES_SECENEKLERI listesi ekle.
+
+  H9 — response_schema Hardcoded
+  Dosya: ui.py, satır 220-235
+  Sorun: JSON schema ui.py'de tanımlı — değişirse arayüz ve API uyumsuz olur.
+  Çözüm: config.py veya ayrı bir schema.py dosyasına taşı.
+
+
+  ┌──────────────────────────────────────────────────────────┐
+  │  🟢 DÜŞÜK RİSKLİ SORUNLAR (İYİLEŞTİRME)                 │
+  └──────────────────────────────────────────────────────────┘
+
+  U1 — config.py'de gereksiz "import os" (satır 1) — Silinebilir
+  U2 — media.py'de gereksiz "import tempfile" (satır 6) — Silinebilir
+  D2 — media.py'de cv2.VideoCapture deseni tekrarı — video_meta() yardımcısı
+  D3 — ui.py/ui_results.py'de geçici ses yolu deseni tekrarı — gecici_ses_yolu()
+  D4 — media.py satır 37: "simdi = os.path.getmtime" atanmış ama kullanılmamış
+  I1 — SES_HIZ_CARpanI isimlendirme (Türkçe İ/ı tutarsızlığı)
+  I4 — router.py ses_uret() dönüş tipi Tuple[bool, Optional[str]] olmalı
+  B3 — guvenli_json_yukle() JSON dizilerini desteklemiyor (şu an risk yok)
+  H1-H7 — Çeşitli hardcoded değerler config.py'ye taşınabilir
+
+
+  ┌──────────────────────────────────────────────────────────┐
+  │  📐 YAPISAL ÖNERİLER (İLERİDEKİ GELİŞTİRMELER İÇİN)    │
+  └──────────────────────────────────────────────────────────┘
+
+  S1 — ui.py'de Üretim Akışını pipeline.py'ye Taşı
+  Sorun: ui.py (347 satır) UI + iş mantığı + oturum yönetimi karışık.
+  Öneri: Üretim akışını (satır 157-341) pipeline.py'ye taşı.
+         ui.py sadece UI render eder, pipeline.py iş mantığı yürütür.
+
+  S2 — router.py'de Ses İşlemeyi media.py'ye Taşı
+  Sorun: ses_uret() içinde WAV yazma + hızlandırma = media sorumluluğu.
+  Öneri: router.ses_uret() sadece API çağrısı yapsın, ham ses verisini
+         döndürsün. WAV yazma + hızlandırma media.py'de olsun.
+
+  NOT: S1 ve S2 ORTA riskli yeniden yapılandırmalardır.
+       Mevcut yapı çalışıyor, bu öneriler ileride kod büyüdükçe düşünülebilir.
+
+
+════════════════════════════════════════════════════════════════
+  10. DOSYA BOYUTLARI & SORUMLULUK DAĞILIMI
+════════════════════════════════════════════════════════════════
+
+  Dosya             Satır   Sorumluluk                    Durum
+  ────────────────  ──────  ────────────────────────────  ─────────
+  config.py          50     Sabitler & ayarlar            ✅ Temiz
+  utils.py           46     Genel yardımcılar             ✅ Temiz
+  prompts.py         69     Prompt okuma & oluşturma      ✅ Temiz
+  storage.py         49     Kayıt yönetimi                ✅ Temiz
+  ui_sidebar.py      79     Sidebar bileşeni              ✅ Temiz
+  media.py          242     Ses/video işleme              ✅ Temiz
+  router.py         215     API rotasyon & istek          ⚠️ S2 için aday
+  ui_results.py     199     Sonuç gösterimi               ⚠️ B2 bug
+  ui.py             347     Ana UI + üretim akışı         ⚠️ S1 için aday
+  app.py              3     Giriş noktası                 ✅ Temiz
+  ────────────────  ──────
+  TOPLAM          ~1,299    Python kodu (prompts hariç)
+
+
+════════════════════════════════════════════════════════════════
+  11. SONUÇ
+════════════════════════════════════════════════════════════════
+
+  ✅ Klasör/dosya yapısı: Düzgün ayrılmış, döngüsel import yok
+  ✅ Hedef kelime tek kaynak: config.py → prompts.py → .txt şablonları
+  ✅ Prompt yönetimi: prompts/ klasörü + prompts.py okuyucusu
+  ✅ Kayıt yönetimi: storage.py ayrı modül
+  ✅ Sidebar/Results: ui_sidebar.py ve ui_results.py ayrı bileşenler
+
+  🔴 DÜZELTİLMELİ (2 adet):
+     B1 — ffmpeg fallback argüman sırası hatası (runtime crash)
+     B2 — "Yeniden Ses ve Video" butonu video üretmiyor
+
+  🟡 İYİLEŞTİRİLEBİLİR (9 adet):
+     Kullanılmayan importlar, kırılgan karşılaştırma, locale tarih,
+     WAV tekrarı, hardcoded ses listesi/schema
+
+  🟢 İSTEĞE BAĞLI (9 adet):
+     Gereksiz importlar, küçük tekrarlar, isimlendirme, tip açıklaması
+
+  📐 İLERİDE DÜŞÜNÜLEBİLİR (2 adet):
+     pipeline.py (ui.py'den iş mantığı ayırma)
+     media.py'ye ses işleme taşıma (router.py'den)
