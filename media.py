@@ -209,7 +209,14 @@ def video_ve_sesi_birlestir(
     log_ekle,
     hedef_y: int = HEDEF_2K_Y
 ) -> bool:
-    """Videoya AI sesini ekle + seçilen upscale + sese uyum için video yavaşlatma (KESME YOK)"""
+    """
+    Videoya AI sesini ekle + seçilen upscale + sese uyum için video yavaşlatma.
+    Yeni mantık:
+      1) Önce video hedef süreye göre yavaşlatılır (setpts)
+      2) Sonra upscale yapılır (scale)
+      3) En son keskinleştirme yapılır (unsharp)
+    Dikey/yatay videolarda kısa kenara göre upscale yapılır.
+    """
 
     if not os.path.exists(video_yolu):
         log_ekle("⚠️ Video dosyası bulunamadı.")
@@ -248,45 +255,16 @@ def video_ve_sesi_birlestir(
         f"Final hedef: {hedef_sure:.2f}s"
     )
 
-    # Upscale hedefi
-    hedef_cozunurluk = int(hedef_y) if hedef_y else HEDEF_2K_Y
-    if hedef_cozunurluk <= 0:
-        hedef_cozunurluk = HEDEF_2K_Y
-
-    # Zaten hedef çözünürlük veya üstündeyse upscale yapma
-    if yukseklik >= hedef_cozunurluk:
-        hedef_cozunurluk = yukseklik
-
-    hedef_x = int(genislik * hedef_cozunurluk / yukseklik)
-    hedef_x += hedef_x % 2   # ffmpeg çift sayı ister
-    hedef_cozunurluk += hedef_cozunurluk % 2
-
-    # Video filtresi parçalarını oluştur
-    vf_parcalari = []
-
-    # Upscale
-    if hedef_cozunurluk != yukseklik:
-        vf_parcalari.append(f"scale={hedef_x}:{hedef_cozunurluk}:flags=lanczos")
-
-        if hedef_cozunurluk >= 2160:
-            log_ekle(f"🎬 4K Upscale: {genislik}x{yukseklik} → {hedef_x}x{hedef_cozunurluk}")
-        elif hedef_cozunurluk >= 1440:
-            log_ekle(f"🎬 2K Upscale: {genislik}x{yukseklik} → {hedef_x}x{hedef_cozunurluk}")
-        else:
-            log_ekle(f"🎬 Upscale: {genislik}x{yukseklik} → {hedef_x}x{hedef_cozunurluk}")
-
-    # Keskinleştirme
-    vf_parcalari.append("unsharp=5:5:1.0:3:3:0.0")
-
-    # Video yavaşlatma: final hedef süre video'dan uzunsa videoyu hedefe uydur
+    # ============================================================
+    # 1) ÖNCE YAVAŞLATMA HESAPLA
+    # ============================================================
     video_yavaslatma = 1.0
+
     if hedef_sure > video_sure + 0.0001:
         if hedef_sure > video_sure * 3:
             log_ekle("⚠️ Dikkat: Hedef süre videonun 3 katından fazla. Video çok yavaşlayacak.")
 
         video_yavaslatma = video_sure / hedef_sure
-        setpts_carpani = round(1.0 / video_yavaslatma, 4)
-        vf_parcalari.append(f"setpts=PTS*{setpts_carpani}")
 
         yavas_video_sure = video_sure / video_yavaslatma
         log_ekle(
@@ -297,74 +275,205 @@ def video_ve_sesi_birlestir(
         hedef_sure = video_sure
         log_ekle("🎬 Video yavaşlatma gerekmedi (hedef süre videoya yakın veya kısa).")
 
-    vf_filtre = ",".join(vf_parcalari)
+    # ============================================================
+    # YARDIMCI: HEDEF ÇÖZÜNÜRLÜK HESAPLA
+    # ============================================================
+    def calculate_target_resolution(target_short_edge):
+        """
+        target_short_edge:
+          - None ise orijinal çözünürlük döner
+          - 1440 ise 2K mantığı
+          - 2160 ise 4K mantığı
+
+        Dikey videolarda kısa kenar genişliktir.
+        Yatay videolarda kısa kenar yüksekliktir.
+        """
+        if target_short_edge is None:
+            return genislik, yukseklik, False
+
+        try:
+            target_short_edge = int(target_short_edge)
+        except Exception:
+            target_short_edge = HEDEF_2K_Y
+
+        if target_short_edge <= 0:
+            return genislik, yukseklik, False
+
+        orijinal_kisa_kenar = min(genislik, yukseklik)
+
+        # Zaten hedef kısa kenara eşit veya daha büyükse upscale yapma
+        if orijinal_kisa_kenar >= target_short_edge:
+            return genislik, yukseklik, False
+
+        # Yatay video: hedef kısa kenar yükseklik olur
+        if genislik >= yukseklik:
+            out_h = target_short_edge
+            out_w = int(round(genislik * out_h / yukseklik)) if yukseklik > 0 else genislik
+        # Dikey video: hedef kısa kenar genişlik olur
+        else:
+            out_w = target_short_edge
+            out_h = int(round(yukseklik * out_w / genislik)) if genislik > 0 else yukseklik
+
+        out_w = max(2, out_w)
+        out_h = max(2, out_h)
+
+        # ffmpeg çift sayı ister
+        out_w += out_w % 2
+        out_h += out_h % 2
+
+        return out_w, out_h, True
+
+    # ============================================================
+    # YARDIMCI: VIDEO FİLTRESİ OLUŞTUR
+    # ============================================================
+    def build_vf(target_short_edge, unsharp=True):
+        """
+        Filtre sırası:
+          1) setpts  -> yavaşlatma
+          2) scale   -> upscale
+          3) unsharp -> keskinleştirme
+        """
+        vf_parts = []
+
+        # 1) Önce yavaşlatma
+        if video_yavaslatma < 0.999 and video_yavaslatma > 0:
+            setpts_carpani = round(1.0 / video_yavaslatma, 4)
+            vf_parts.append(f"setpts=PTS*{setpts_carpani}")
+
+        # 2) Upscale
+        out_w, out_h, upscaled = calculate_target_resolution(target_short_edge)
+        if upscaled:
+            vf_parts.append(f"scale={out_w}:{out_h}:flags=lanczos")
+
+        # 3) Keskinleştirme
+        if unsharp:
+            vf_parts.append("unsharp=5:5:1.0:3:3:0.0")
+
+        return ",".join(vf_parts), out_w, out_h, upscaled
+
+    # ============================================================
+    # 2) UPSCALE HEDEFİNİ BELİRLE
+    # ============================================================
+    hedef_kenar = int(hedef_y) if hedef_y else HEDEF_2K_Y
+    if hedef_kenar <= 0:
+        hedef_kenar = HEDEF_2K_Y
+
+    vf_filtre, out_w, out_h, upscaled = build_vf(hedef_kenar, unsharp=True)
+
+    if upscaled:
+        if hedef_kenar >= 2160:
+            log_ekle(f"🎬 4K Upscale: {genislik}x{yukseklik} → {out_w}x{out_h}")
+        elif hedef_kenar >= 1440:
+            log_ekle(f"🎬 2K Upscale: {genislik}x{yukseklik} → {out_w}x{out_h}")
+        else:
+            log_ekle(f"🎬 Upscale: {genislik}x{yukseklik} → {out_w}x{out_h}")
+    else:
+        log_ekle(
+            f"🎬 Upscale gerekmedi: {genislik}x{yukseklik} | "
+            f"hedef kısa kenar {hedef_kenar}px"
+        )
+
+    log_ekle(f"📐 Çıkış hedefi: {out_w}x{out_h}")
+    log_ekle(f"🎛️ Video filtresi: {vf_filtre}")
 
     # 4K için daha hızlı preset ve daha uzun timeout
-    encode_preset = "veryfast" if hedef_cozunurluk >= 2160 else VIDEO_PRESET
-    ffmpeg_timeout = 900 if hedef_cozunurluk >= 2160 else 300
+    encode_preset = "veryfast" if hedef_kenar >= 2160 else VIDEO_PRESET
+    ffmpeg_timeout = 900 if hedef_kenar >= 2160 else 300
 
-    if hedef_cozunurluk >= 2160 and video_sure > 120:
+    if hedef_kenar >= 2160 and video_sure > 120:
         log_ekle("⚠️ 4K + uzun video: işlem normalden uzun sürebilir.")
 
-    komut = [
-        FFMPEG_BIN, "-y",
-        "-i", video_yolu,
-        "-i", ses_yolu,
-        "-vf", vf_filtre,
-        "-af", "apad",
-        "-t", f"{hedef_sure:.3f}",
-        "-c:v", "libx264", "-preset", encode_preset, "-crf", str(VIDEO_CRF),
-        "-c:a", "aac", "-b:a", "192k",
-        "-map", "0:v:0",
-        "-map", "1:a:0",
-        cikti_v_yolu
-    ]
+    # ============================================================
+    # FFMPEG ÇALIŞTIRMA YARDIMCISI
+    # ============================================================
+    def run_ffmpeg(vf_str: str, use_libx264: bool = True):
+        komut = [
+            FFMPEG_BIN, "-y",
+            "-i", video_yolu,
+            "-i", ses_yolu,
+        ]
 
+        if vf_str:
+            komut += ["-vf", vf_str]
+
+        if use_libx264:
+            komut += [
+                "-c:v", "libx264",
+                "-preset", encode_preset,
+                "-crf", str(VIDEO_CRF),
+            ]
+        else:
+            komut += ["-c:v", "copy"]
+
+        komut += [
+            "-af", "apad",
+            "-t", f"{hedef_sure:.3f}",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-map", "0:v:0",
+            "-map", "1:a:0",
+            cikti_v_yolu
+        ]
+
+        return subprocess.run(komut, capture_output=True, text=True, timeout=ffmpeg_timeout)
+
+    # ============================================================
+    # RENDER
+    # ============================================================
     try:
-        sonuc = subprocess.run(komut, capture_output=True, text=True, timeout=ffmpeg_timeout)
+        sonuc = run_ffmpeg(vf_filtre, True)
 
-        if sonuc.returncode != 0:
-            log_ekle(f"⚠️ ffmpeg hata: {sonuc.stderr[-300:] if sonuc.stderr else 'bilinmeyen'}")
-
-            # Fallback: upscale olmadan tekrar dene (yavaşlatma korunur)
-            log_ekle("🔄 Fallback: upscale olmadan tekrar deneniyor...")
-
-            fallback_vf = None
-            if video_yavaslatma < 0.999:
-                fallback_vf = f"setpts=PTS*{round(1.0 / video_yavaslatma, 4)}"
-
-            fallback_komut = [
-                FFMPEG_BIN, "-y",
-                "-i", video_yolu,
-                "-i", ses_yolu,
-            ]
-
-            if fallback_vf:
-                fallback_komut += ["-vf", fallback_vf]
-                fallback_komut += ["-c:v", "libx264", "-preset", encode_preset, "-crf", str(VIDEO_CRF)]
-            else:
-                fallback_komut += ["-c:v", "copy"]
-
-            fallback_komut += [
-                "-af", "apad",
-                "-t", f"{hedef_sure:.3f}",
-                "-c:a", "aac", "-b:a", "192k",
-                "-map", "0:v:0",
-                "-map", "1:a:0",
-                cikti_v_yolu
-            ]
-
-            fallback_sonuc = subprocess.run(fallback_komut, capture_output=True, text=True, timeout=ffmpeg_timeout)
-
-            if fallback_sonuc.returncode != 0:
-                log_ekle(f"⚠️ Fallback ffmpeg hata: {fallback_sonuc.stderr[-300:] if fallback_sonuc.stderr else 'bilinmeyen'}")
-                return False
-
-            log_ekle("✅ Video + ses birleştirildi (fallback: orijinal çözünürlük)")
+        if sonuc.returncode == 0:
+            log_ekle("✅ Video ve ses başarıyla birleştirildi!")
             return True
 
-        log_ekle("✅ Video ve ses başarıyla birleştirildi!")
-        return True
+        log_ekle(f"⚠️ ffmpeg hata: {sonuc.stderr[-300:] if sonuc.stderr else 'bilinmeyen'}")
+
+        # ============================================================
+        # FALLBACK 1: 4K seçildiyse 2K'ya düş
+        # ============================================================
+        fallback_hedef = 1440 if hedef_kenar >= 2160 else None
+
+        if fallback_hedef is not None:
+            log_ekle(f"🔄 Fallback: {fallback_hedef}px upscale deneniyor...")
+        else:
+            log_ekle("🔄 Fallback: orijinal çözünürlük deneniyor...")
+
+        fallback_vf, fb_w, fb_h, fb_upscaled = build_vf(fallback_hedef, unsharp=False)
+
+        if fallback_vf:
+            fallback_sonuc = run_ffmpeg(fallback_vf, True)
+        else:
+            fallback_sonuc = run_ffmpeg("", False)
+
+        if fallback_sonuc.returncode == 0:
+            if fb_upscaled:
+                log_ekle(f"✅ Video + ses birleştirildi (fallback upscale: {fb_w}x{fb_h})")
+            else:
+                log_ekle("✅ Video + ses birleştirildi (fallback: orijinal çözünürlük)")
+            return True
+
+        log_ekle(f"⚠️ Fallback ffmpeg hata: {fallback_sonuc.stderr[-300:] if fallback_sonuc.stderr else 'bilinmeyen'}")
+
+        # ============================================================
+        # FALLBACK 2: Gerekirse tamamen orijinal çözünürlüğe düş
+        # ============================================================
+        if fallback_hedef is not None:
+            log_ekle("🔄 Son fallback: orijinal çözünürlük deneniyor...")
+            final_vf, _, _, _ = build_vf(None, unsharp=False)
+
+            if final_vf:
+                final_sonuc = run_ffmpeg(final_vf, True)
+            else:
+                final_sonuc = run_ffmpeg("", False)
+
+            if final_sonuc.returncode == 0:
+                log_ekle("✅ Video + ses birleştirildi (son fallback: orijinal çözünürlük)")
+                return True
+
+            log_ekle(f"⚠️ Son fallback ffmpeg hata: {final_sonuc.stderr[-300:] if final_sonuc.stderr else 'bilinmeyen'}")
+
+        return False
 
     except FileNotFoundError:
         log_ekle("⚠️ ffmpeg bulunamadı!")
@@ -375,4 +484,3 @@ def video_ve_sesi_birlestir(
     except Exception as e:
         log_ekle(f"⚠️ Video-ses birleştirme hatası: {e}")
         return False
-
