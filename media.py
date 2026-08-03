@@ -1,6 +1,8 @@
 """Ses ve video işleme fonksiyonları (ffmpeg, hızlandırma, birleştirme)."""
 import os
+import re
 import wave
+import math
 import shutil
 import subprocess
 import tempfile
@@ -84,6 +86,7 @@ def sesi_hizlandir(giris_dosyasi: str, cikti_dosyasi: str, hiz_carpani: float, l
         except Exception as e:
             log_ekle(f"⚠️ Ses kopyalanamadı: {e}")
             return False
+
     # ffmpeg atempo filtresi sadece 0.5–2.0 arası değerleri kabul eder
     if hiz_carpani < 0.5 or hiz_carpani > 2.0:
         carpanlar = []
@@ -124,10 +127,8 @@ def sesi_hizlandir(giris_dosyasi: str, cikti_dosyasi: str, hiz_carpani: float, l
 # ===== VİDEO BİLGİ ALMA =====
 def _video_bilgi_al(video_yolu: str) -> dict:
     """Video metadata: fps, frames, width, height, duration. Hata olursa varsayılan döner."""
-    import re  # Regex modülünü yerel olarak import et
-    
     bilgi = {"fps": 0.0, "frames": 0, "width": 1920, "height": 1080, "duration": 0.0}
-    
+
     # 1. Önce OpenCV ile temel bilgileri (genişlik, yükseklik) almaya çalış
     try:
         import cv2
@@ -141,30 +142,30 @@ def _video_bilgi_al(video_yolu: str) -> dict:
     except Exception:
         pass
 
-    # 2. Kesin süre tespiti için FFMPEG kullan (OpenCV frame_count çoğu MP4/MOV/WebM'de hatalı döner)
+    # 2. Kesin süre tespiti için FFMPEG kullan
     try:
         komut = [FFMPEG_BIN, "-i", video_yolu, "-hide_banner"]
         sonuc = subprocess.run(komut, capture_output=True, text=True, timeout=30)
-        
+
         # Süreyi bul (Format: HH:MM:SS.ms)
         sure_match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", sonuc.stderr)
         if sure_match:
             h, m, s = map(float, sure_match.groups())
             bilgi["duration"] = h * 3600 + m * 60 + s
-            
+
         # Eğer OpenCV fps'i bulamadıysa, ffmpeg çıktısından fps'i bulmaya çalış
         if bilgi["fps"] <= 0:
             fps_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:fps|tbr)", sonuc.stderr)
             if fps_match:
                 bilgi["fps"] = float(fps_match.group(1))
-                
+
         # Eğer OpenCV genişlik/yükseklik bulamadıysa, ffmpeg'den al
         if bilgi["width"] <= 0 or bilgi["height"] <= 0:
             coz_match = re.search(r"(\d{2,5})x(\d{2,5})", sonuc.stderr)
             if coz_match:
                 bilgi["width"] = int(coz_match.group(1))
                 bilgi["height"] = int(coz_match.group(2))
-                
+
     except Exception:
         pass
 
@@ -202,7 +203,24 @@ def video_ve_sesi_birlestir(video_yolu: str, ses_yolu: str, cikti_v_yolu: str, l
     # Süreleri al
     video_sure = bilgi["duration"] if bilgi["duration"] > 0 else 30.0
     ses_sure = _ses_suresini_al(ses_yolu)
-    log_ekle(f"⏱️ Video: {video_sure:.1f}s | Ses: {ses_sure:.1f}s")
+
+    # ✅ Ses süresini güvenlik için ÜST tam sayıya yuvarla
+    # Örnek: 15.7 -> 16
+    hedef_ses_suresi = 0
+    if ses_sure > 0:
+        hedef_ses_suresi = math.ceil(ses_sure - 0.001)
+        if hedef_ses_suresi < 1:
+            hedef_ses_suresi = 1
+
+    # Final hedef süre: video süresi ve üst yuvarlanmış ses süresinden büyük olanı seç
+    hedef_sure = max(video_sure, float(hedef_ses_suresi), ses_sure)
+
+    log_ekle(
+        f"⏱️ Video: {video_sure:.2f}s | "
+        f"Ses: {ses_sure:.2f}s | "
+        f"Ses üst hedef: {float(hedef_ses_suresi):.2f}s | "
+        f"Final hedef: {hedef_sure:.2f}s"
+    )
 
     # Hedef: 2K upscale (1440p) — zaten 2K+ ise sadece keskinleştir
     if yukseklik >= HEDEF_2K_Y:
@@ -222,19 +240,27 @@ def video_ve_sesi_birlestir(video_yolu: str, ses_yolu: str, cikti_v_yolu: str, l
         vf_parcalari.append(f"scale={hedef_x}:{hedef_y}:flags=lanczos")
         log_ekle(f"🎬 2K Upscale: {genislik}x{yukseklik} → {hedef_x}x{hedef_y}")
 
-    # Keskinleştirme (4K upscale sonrası detayları netleştir)
+    # Keskinleştirme
     vf_parcalari.append("unsharp=5:5:1.0:3:3:0.0")
 
-    # Video yavaşlatma: ses video'dan uzunsa videoyu yavaşlat (max 0.9x)
-    video_yavaslatma = 1.0  # 1.0 = yavaşlatma yok
-    if ses_sure > 0 and video_sure > 0 and ses_sure > video_sure:
-        video_yavaslatma = max(0.9, video_sure / ses_sure)
+    # Video yavaşlatma: final hedef süre video'dan uzunsa videoyu hedefe uydur
+    video_yavaslatma = 1.0
+    if hedef_sure > video_sure + 0.0001:
+        if hedef_sure > video_sure * 3:
+            log_ekle("⚠️ Dikkat: Hedef süre videonun 3 katından fazla. Video çok yavaşlayacak.")
+
+        video_yavaslatma = video_sure / hedef_sure
         setpts_carpani = round(1.0 / video_yavaslatma, 4)
         vf_parcalari.append(f"setpts=PTS*{setpts_carpani}")
+
         yavas_video_sure = video_sure / video_yavaslatma
-        log_ekle(f"🎬 Video yavaşlatılıyor: {video_yavaslatma:.2f}x → {video_sure:.1f}s → {yavas_video_sure:.1f}s (sese uyum)")
+        log_ekle(
+            f"🎬 Video hedefe uyduruluyor: {video_yavaslatma:.3f}x → "
+            f"{video_sure:.2f}s → {yavas_video_sure:.2f}s"
+        )
     else:
-        log_ekle("🎬 Video yavaşlatma gereksiz (ses video'dan kısa veya eşit)")
+        hedef_sure = video_sure
+        log_ekle("🎬 Video yavaşlatma gerekmedi (hedef süre videoya yakın veya kısa).")
 
     vf_filtre = ",".join(vf_parcalari)
 
@@ -243,43 +269,59 @@ def video_ve_sesi_birlestir(video_yolu: str, ses_yolu: str, cikti_v_yolu: str, l
         "-i", video_yolu,
         "-i", ses_yolu,
         "-vf", vf_filtre,
+        "-af", "apad",
+        "-t", f"{hedef_sure:.3f}",
         "-c:v", "libx264", "-preset", VIDEO_PRESET, "-crf", str(VIDEO_CRF),
         "-c:a", "aac", "-b:a", "192k",
         "-map", "0:v:0",
         "-map", "1:a:0",
         cikti_v_yolu
     ]
+
     try:
         sonuc = subprocess.run(komut, capture_output=True, text=True, timeout=300)
         if sonuc.returncode != 0:
             log_ekle(f"⚠️ ffmpeg hata: {sonuc.stderr[-300:] if sonuc.stderr else 'bilinmeyen'}")
+
             # Fallback: upscale olmadan tekrar dene (yavaşlatma korunur)
             log_ekle("🔄 Fallback: upscale olmadan tekrar deneniyor...")
-            fallback_vf = f"setpts=PTS*{round(1.0/video_yavaslatma,4)}" if video_yavaslatma < 1.0 else None
+
+            fallback_vf = None
+            if video_yavaslatma < 0.999:
+                fallback_vf = f"setpts=PTS*{round(1.0 / video_yavaslatma, 4)}"
+
             fallback_komut = [
                 FFMPEG_BIN, "-y",
                 "-i", video_yolu,
                 "-i", ses_yolu,
             ]
+
             if fallback_vf:
                 fallback_komut += ["-vf", fallback_vf]
                 fallback_komut += ["-c:v", "libx264", "-preset", VIDEO_PRESET, "-crf", str(VIDEO_CRF)]
             else:
                 fallback_komut += ["-c:v", "copy"]
+
             fallback_komut += [
+                "-af", "apad",
+                "-t", f"{hedef_sure:.3f}",
                 "-c:a", "aac", "-b:a", "192k",
                 "-map", "0:v:0",
                 "-map", "1:a:0",
                 cikti_v_yolu
             ]
+
             fallback_sonuc = subprocess.run(fallback_komut, capture_output=True, text=True, timeout=300)
             if fallback_sonuc.returncode != 0:
                 log_ekle(f"⚠️ Fallback ffmpeg hata: {fallback_sonuc.stderr[-300:] if fallback_sonuc.stderr else 'bilinmeyen'}")
                 return False
+
             log_ekle("✅ Video + ses birleştirildi (fallback: orijinal çözünürlük)")
             return True
+
         log_ekle("✅ Video ve ses başarıyla birleştirildi (2K upscale + keskinleştirme)!")
         return True
+
     except FileNotFoundError:
         log_ekle("⚠️ ffmpeg bulunamadı!")
         return False
