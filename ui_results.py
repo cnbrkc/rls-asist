@@ -19,7 +19,6 @@ def render_results(log_ekle, router) -> None:
     sonuc = st.session_state.sonuc
     veri = sonuc["veri"]
     kullanilan_metin_modeli = sonuc.get("kullanilan_metin_modeli", "?")
-
     st.success(f"✅ Başarılı! ({kullanilan_metin_modeli})")
 
     c1, c2 = st.columns([3, 1])
@@ -41,15 +40,21 @@ def render_results(log_ekle, router) -> None:
             st.rerun()
 
     st.markdown("### 🎬 Hazır Video (AI Sesli)")
-
     st.markdown("**📺 AI Ses Eklenmiş Video** (Orijinal video + AI seslendirme)")
+    
     if sonuc.get("final_video") and os.path.exists(sonuc["final_video"]):
-        with open(sonuc["final_video"], "rb") as f:
-            vid_bytes = f.read()
-        st.video(vid_bytes)
+        # ✅ ÖNİZLEME TOGGLE - Varsayılan kapalı
+        show_generated = st.toggle("👁️ Üretilen Videoyu Göster", value=False, key="show_generated_video")
+        
+        if show_generated:
+            with open(sonuc["final_video"], "rb") as f:
+                vid_bytes = f.read()
+            st.video(vid_bytes)
 
         c_dl, c_share = st.columns(2)
         with c_dl:
+            with open(sonuc["final_video"], "rb") as f:
+                vid_bytes = f.read()
             st.download_button(
                 "⬇️ İndir (.mp4)",
                 vid_bytes,
@@ -61,37 +66,38 @@ def render_results(log_ekle, router) -> None:
             # Web Share API → iOS'ta "Videoyu Kaydet" = Fotoğraflara gider
             vid_b64 = base64.b64encode(vid_bytes).decode()
             components.html(f"""
-            <button onclick="shareVideo()" style="
-                width:100%;height:48px;font-size:16px;font-weight:600;
-                background:linear-gradient(135deg,#ff4b4b,#ff6b6b);
-                color:#fff;border:none;border-radius:8px;cursor:pointer;
-            ">📤 Paylaş / Galer Kaydet</button>
-            <script>
-            async function shareVideo() {{
-                try {{
-                    const b64 = "{vid_b64}";
-                    const bin = atob(b64);
-                    const arr = new Uint8Array(bin.length);
-                    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-                    const file = new File([arr], 'otoxtra_sesli.mp4', {{ type: 'video/mp4' }});
-                    if (navigator.share && navigator.canShare({{ files: [file] }})) {{
-                        await navigator.share({{ files: [file], title: 'otoXtra Video' }});
-                    }} else {{
-                        const url = URL.createObjectURL(file);
-                        const a = document.createElement('a');
-                        a.href = url; a.download = 'otoxtra_sesli.mp4'; a.click();
-                        URL.revokeObjectURL(url);
-                    }}
-                }} catch(e) {{
-                    console.log('Share:', e);
-                }}
-            }}
-            </script>
-            """, height=55)
+<button onclick="shareVideo()" style="
+    width:100%;height:48px;font-size:16px;font-weight:600;
+    background:linear-gradient(135deg,#ff4b4b,#ff6b6b);
+    color:#fff;border:none;border-radius:8px;cursor:pointer;
+">📤 Paylaş / Galeri Kaydet</button>
+<script>
+async function shareVideo() {{
+    try {{
+        const b64 = "{vid_b64}";
+        const bin = atob(b64);
+        const arr = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+        const file = new File([arr], 'otoxtra_sesli.mp4', {{ type: 'video/mp4' }});
+        if (navigator.share && navigator.canShare({{ files: [file] }})) {{
+            await navigator.share({{ files: [file], title: 'otoXtra Video' }});
+        }} else {{
+            const url = URL.createObjectURL(file);
+            const a = document.createElement('a');
+            a.href = url; a.download = 'otoxtra_sesli.mp4'; a.click();
+            URL.revokeObjectURL(url);
+        }}
+    }} catch(e) {{
+        console.log('Share:', e);
+    }}
+}}
+</script>
+""", height=55)
     else:
         st.warning("⚠️ Video dosyası oluşturulamadı (ffmpeg hatası). Sadece ses mevcut.")
 
     st.divider()
+
     st.markdown("### 🎧 Medya (Ayrı Ses)")
     st.markdown(f"**🎙️ Seslendirme** (model: {sonuc.get('kullanilan_ses_modeli', '?')})")
     if sonuc["ses_basarili"] and os.path.exists(sonuc["ses_dosyasi"]):
@@ -111,9 +117,9 @@ def render_results(log_ekle, router) -> None:
             st.warning("Ses dosyası bulunamadı.")
 
     st.divider()
+
     st.markdown("### 📝 Metin İçerikleri")
     col1, col2, col3 = st.columns(3)
-
     with col1:
         st.subheader("1️⃣ Reels Açıklaması")
         st.caption("Katmanlı caption + 5 hashtag")
@@ -137,6 +143,7 @@ def render_results(log_ekle, router) -> None:
         st.code(markdown_temizle(veri.get("threads_aciklamasi", "")), language=None)
 
     st.divider()
+
     st.markdown("### 🧠 AI Düşünme Zinciri (Strateji)")
     with st.expander("Yapay Zekanın İç Monoloğunu Gör (Nasıl Karar Verdi?)"):
         st.markdown("**1. Beyin Fırtınası:**")
@@ -147,6 +154,7 @@ def render_results(log_ekle, router) -> None:
         st.error(veri.get("oz_elestiri", "Veri bulunamadı."))
 
     st.divider()
+
     st.markdown("### 🎙️ Seslendirme Metni")
     st.caption("TTS için üretilen metin. Düzenleyip yeniden ses ve video üretebilirsiniz.")
 
@@ -175,15 +183,13 @@ def render_results(log_ekle, router) -> None:
                 log_ekle,
                 hiz_carpani=SES_HIZ_CARPANI,
             )
-
             if ses_basarili_yeni and os.path.exists(yeni_ses_dosyasi):
                 # Eski ses dosyasını temizle
                 eski_ses_dosyasi = sonuc.get("ses_dosyasi", "")
                 if eski_ses_dosyasi and os.path.exists(eski_ses_dosyasi):
                     temp_dosya_temizle(eski_ses_dosyasi)
-                    if eski_ses_dosyasi in st.session_state.gecici_ses_dosyalari:
-                        st.session_state.gecici_ses_dosyalari.remove(eski_ses_dosyasi)
-
+                if eski_ses_dosyasi in st.session_state.gecici_ses_dosyalari:
+                    st.session_state.gecici_ses_dosyalari.remove(eski_ses_dosyasi)
                 st.session_state.gecici_ses_dosyalari.append(yeni_ses_dosyasi)
 
                 # Video + ses birleştirme (orijinal video varsa)
