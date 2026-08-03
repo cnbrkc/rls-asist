@@ -4,12 +4,13 @@ import os
 import traceback
 import re
 import math
+import shutil
 
 # Kendi modüllerimiz
 from config import (
     API_KEYS, SES_HIZ_CARPANI, MAX_INPUT_KARAKTER, METIN_MODELLERI,
     VIDEO_FORMATLARI, MAX_VIDEO_BOYUT, MIN_SURE_SANIYE, MAX_SURE_SANIYE,
-    TON_ETIKETLERI, TON_EGLENCE, TON_DENGELI, TON_BILGI, TON_TEKNIK,
+    TON_EGLENCE, TON_DENGELI, TON_BILGI, TON_TEKNIK,
     METIN_SCHEMA,
 )
 from storage import kayit_ekle
@@ -23,19 +24,35 @@ from ui_sidebar import render_sidebar
 from ui_results import render_results
 
 # ============================================================
-# SAYFA AYARLARI
+# SAYFA AYARLARI + DAHA KOMPAKT GÖRÜNÜM
 # ============================================================
 st.set_page_config(page_title="otoXtra", page_icon="🏎️", layout="wide")
 st.markdown("""
 <style>
-.main .block-container { padding-top: 1rem; padding-bottom: 1rem; }
-.stTextArea textarea { font-size: 14px; }
-.stButton button { width: 100%; height: 48px; font-size: 16px; font-weight: 600; }
-[data-testid="stCaptionContainer"] { font-size: 12px; margin-bottom: 0.25rem; }
-[data-testid="stVideo"] video { max-height: 200px; }
-.streamlit-expanderHeader { font-size: 14px; }
-.gecmis-item { padding: 8px; margin: 4px 0; border-radius: 6px; cursor: pointer; }
-.gecmis-item:hover { background-color: #f0f0f0; }
+.main .block-container {
+    padding-top: 0.25rem;
+    padding-bottom: 0.35rem;
+    max-width: 900px;
+}
+.stTextArea textarea {
+    font-size: 13px;
+}
+.stButton button {
+    width: 100%;
+    height: 44px;
+    font-size: 15px;
+    font-weight: 600;
+}
+[data-testid="stCaptionContainer"] {
+    font-size: 12px;
+    margin-bottom: 0.15rem;
+}
+[data-testid="stVideo"] video {
+    max-height: 180px;
+}
+.streamlit-expanderHeader {
+    font-size: 13px;
+}
 </style>
 <link rel="manifest" href="/app/static/manifest.json">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -44,8 +61,7 @@ st.markdown("""
 <meta name="theme-color" content="#ff4b4b">
 """, unsafe_allow_html=True)
 
-st.markdown("### 🏎️ otoXtra")
-st.caption("Reels + Threads otomatik üretim & Ses/Video Birleştirme")
+# Başlık ve caption kaldırıldı: daha kompakt ana ekran
 
 # ============================================================
 # SESSION STATE BAŞLATMA
@@ -62,9 +78,32 @@ if "_sonuc_versiyon_last" not in st.session_state:
     st.session_state._sonuc_versiyon_last = -1
 if "blacklist" not in st.session_state:
     st.session_state.blacklist = {}
+if "upscale_hedef_y" not in st.session_state:
+    st.session_state.upscale_hedef_y = 1440
 
 router = SmartRouter()
 eski_ses_dosyalarini_temizle()
+
+# ============================================================
+# YARDIMCI: UPLOAD DOSYASINI GEÇİCİ DOSYAYA YAZ
+# ============================================================
+def upload_dosyasini_kaydet(upload_obj, hedef_yol: str) -> None:
+    """
+    UploadedFile'ı mümkün olduğunca stream olarak diske yazar.
+    Böylece büyük dosyalarda gereksiz bellek yükü azaltılır.
+    """
+    try:
+        upload_obj.seek(0)
+        with open(hedef_yol, "wb") as f:
+            shutil.copyfileobj(upload_obj, f)
+        upload_obj.seek(0)
+    except Exception:
+        with open(hedef_yol, "wb") as f:
+            f.write(upload_obj.getvalue())
+        try:
+            upload_obj.seek(0)
+        except Exception:
+            pass
 
 # ============================================================
 # SIDEBAR
@@ -75,7 +114,7 @@ render_sidebar()
 # ANA ARAYÜZ
 # ============================================================
 uploaded_video = st.file_uploader(
-    "🎥 Referans Video (Süre otomatik algılanır)",
+    "🎥 Referans Video",
     type=VIDEO_FORMATLARI,
     help="Videoyu yüklersiniz; süre otomatik tespit edilir ve ses buna göre ayarlanır.",
     key="video_uploader"
@@ -93,16 +132,28 @@ if uploaded_video is not None:
     if video_buyuk:
         st.warning("⚠️ Video 50 MB üstü! Sıkıştırmanız önerilir.")
 
-    # Hızlı süre tespiti
-    temp_check_path = gecici_dosya_yolu("check", "mp4")
-    try:
-        with open(temp_check_path, "wb") as f:
-            f.write(uploaded_video.getvalue())
-        detected = video_suresini_al(temp_check_path)
-    except Exception:
+    # Upload cache anahtarı
+    upload_id = getattr(uploaded_video, "file_id", None)
+    if not upload_id:
+        upload_id = f"{uploaded_video.name}_{uploaded_video.type}"
+    upload_key = f"{upload_id}_{uploaded_video.size}"
+
+    # Süre tespitini her rerun'da tekrar çalıştırma
+    if st.session_state.get("upload_key") != upload_key:
+        temp_check_path = gecici_dosya_yolu("check", "mp4")
         detected = 0.0
-    finally:
-        temp_dosya_temizle(temp_check_path)
+        try:
+            upload_dosyasini_kaydet(uploaded_video, temp_check_path)
+            detected = video_suresini_al(temp_check_path)
+        except Exception:
+            detected = 0.0
+        finally:
+            temp_dosya_temizle(temp_check_path)
+
+        st.session_state.upload_key = upload_key
+        st.session_state.upload_duration = detected
+    else:
+        detected = st.session_state.get("upload_duration", 0.0)
 
     if detected >= 1.0:
         # ✅ AI hedef süresi: tespit edilen süreyi AŞAĞI yuvarla
@@ -123,32 +174,64 @@ if uploaded_video is not None:
             key="manual_sure_input"
         ))
 
-c1, c2 = st.columns(2)
-with c1:
-    video_analiz_notlari = st.text_area(
-        "🔍 Analiz Notları",
-        height=90,
-        placeholder="Örn: 'Araç hızlanma anını vurgula'",
-        key="video_analiz_notlari"
-    )
-with c2:
-    metin_uretim_notlari = st.text_area(
-        "✍️ Üretim Notları",
-        height=90,
-        placeholder="Örn: 'Fiyat söyleme, performansa odaklan'",
-        key="metin_uretim_notlari"
-    )
+    # Notlar
+    c1, c2 = st.columns(2)
+    with c1:
+        video_analiz_notlari = st.text_area(
+            "🔍 Analiz Notları",
+            height=70,
+            placeholder="Örn: 'Araç hızlanma anını vurgula'",
+            key="video_analiz_notlari"
+        )
+    with c2:
+        metin_uretim_notlari = st.text_area(
+            "✍️ Üretim Notları",
+            height=70,
+            placeholder="Örn: 'Fiyat söyleme, performansa odaklan'",
+            key="metin_uretim_notlari"
+        )
 
-# TON radio: Anahtar=TON_*, Etiket=emoji + açıklama
-ton_anahtarlari = [TON_EGLENCE, TON_DENGELI, TON_BILGI, TON_TEKNIK]
-icerik_tonu = st.radio(
-    "🎯 İçerik Tonu",
-    ton_anahtarlari,
-    index=1,
-    format_func=lambda k: TON_ETIKETLERI[k],
-    horizontal=True,
-    key="icerik_tonu"
-)
+    # Ton ve kalite seçimleri yan yana
+    col_ton, col_upscale = st.columns([3, 2])
+
+    with col_ton:
+        ton_anahtarlari = [TON_EGLENCE, TON_DENGELI, TON_BILGI, TON_TEKNIK]
+        ton_kisa = {
+            TON_EGLENCE: "🎭 Eğlence",
+            TON_DENGELI: "⚖️ Dengeli",
+            TON_BILGI: "🧠 Bilgi",
+            TON_TEKNIK: "📊 Teknik",
+        }
+        icerik_tonu = st.radio(
+            "🎯 Ton",
+            ton_anahtarlari,
+            index=1,
+            format_func=lambda k: ton_kisa[k],
+            horizontal=True,
+            key="icerik_tonu"
+        )
+
+    with col_upscale:
+        upscale_secimi = st.radio(
+            "🎞️ Kalite",
+            ["2K", "4K"],
+            index=0,
+            horizontal=True,
+            help="Varsayılan: 2K. 4K daha kaliteli ama işlem süresi uzar."
+        )
+
+    upscale_hedef_y = 1440 if upscale_secimi == "2K" else 2160
+    st.session_state.upscale_hedef_y = upscale_hedef_y
+
+else:
+    st.session_state.pop("upload_key", None)
+    st.session_state.pop("upload_duration", None)
+    video_analiz_notlari = ""
+    metin_uretim_notlari = ""
+    icerik_tonu = TON_DENGELI
+    upscale_secimi = "2K"
+    upscale_hedef_y = 1440
+    st.session_state.upscale_hedef_y = upscale_hedef_y
 
 buton_tiklandi = st.button("🚀 ÜRET!", disabled=uploaded_video is None, use_container_width=True)
 
@@ -179,10 +262,9 @@ def ilerlemeyi_guncelle(adim: int, toplam: int, mesaj: str) -> None:
 # ÜRETİM AKIŞI
 # ============================================================
 if buton_tiklandi and uploaded_video is not None:
-    # Wake Lock + beforeunload: İşlem sırasında ekranı açık tut, sayfadan ayrılma uyarısı
+    # Wake Lock + beforeunload
     components.html("""
 <script>
-// Wake Lock API (ekranı açık tutar)
 window._otoxtra_wakeLock = null;
 async function requestWakeLock() {
     try {
@@ -194,7 +276,6 @@ async function requestWakeLock() {
 }
 requestWakeLock();
 
-// beforeunload: Sayfadan ayrılmak isteyince uyarı
 window._otoxtra_beforeunload = function(e) {
     e.preventDefault();
     e.returnValue = 'otoXtra üretim devam ediyor! Çıkmak istediğinize emin misiniz?';
@@ -214,20 +295,23 @@ window.addEventListener('beforeunload', window._otoxtra_beforeunload);
 
     st.session_state.log_satirlari = []
     log_ekle("🚀 Üretim başladı...")
+    log_ekle(f"⏱️ AI hedef video süresi: {sure_saniye} saniye")
+    log_ekle(f"🎞️ Upscale hedefi: {upscale_secimi} ({upscale_hedef_y}p)")
     ilerlemeyi_guncelle(0, 4, "Başlatılıyor...")
 
     temp_input_video = gecici_dosya_yolu("input", "mp4")
-    with open(temp_input_video, "wb") as f:
-        f.write(uploaded_video.getvalue())
+    upload_dosyasini_kaydet(uploaded_video, temp_input_video)
 
     try:
-        log_ekle(f"⏱️ AI hedef video süresi: {sure_saniye} saniye")
-
         # ADIM 1: Video Analiz
         ilerlemeyi_guncelle(1, 4, "🎥 Video analiz ediliyor...")
         log_ekle("🎥 Video analiz ediliyor...")
+
+        uploaded_video.seek(0)
+        video_bytes = uploaded_video.getvalue()
+
         analiz_metni, _ = router.video_analiz_et(
-            uploaded_video.getvalue(),
+            video_bytes,
             uploaded_video.type or "video/mp4",
             video_analiz_notlari,
             sure_saniye,
@@ -292,7 +376,8 @@ window.addEventListener('beforeunload', window._otoxtra_beforeunload);
             temp_input_video,
             ses_dosyasi,
             output_video_path,
-            log_ekle
+            log_ekle,
+            hedef_y=upscale_hedef_y
         )
 
         final_video_yolu = output_video_path if (render_basarili and os.path.exists(output_video_path)) else ""
@@ -334,6 +419,7 @@ if (window._otoxtra_beforeunload) {
             "kullanilan_threads_modeli": kullanilan_threads_modeli,
             "final_video": final_video_yolu,
             "temp_input_video": temp_input_video,
+            "upscale_hedef_y": upscale_hedef_y,
         }
         st.session_state._sonuc_versiyon += 1
 
