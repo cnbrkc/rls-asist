@@ -3,6 +3,7 @@ import streamlit.components.v1 as components
 import os
 import traceback
 import re
+import math
 
 # Kendi modüllerimiz
 from config import (
@@ -84,12 +85,11 @@ video_buyuk = uploaded_video is not None and uploaded_video.size > MAX_VIDEO_BOY
 sure_saniye = 30  # Varsayılan
 
 if uploaded_video is not None:
-    # ✅ ÖNİZLEME TOGGLE - Varsayılan kapalı
+    # Önizleme varsayılan gizli
     show_uploaded = st.toggle("👁️ Yüklenen Videoyu Göster", value=False, key="show_uploaded_video")
-    
     if show_uploaded:
         st.video(uploaded_video)
-    
+
     if video_buyuk:
         st.warning("⚠️ Video 50 MB üstü! Sıkıştırmanız önerilir.")
 
@@ -105,11 +105,23 @@ if uploaded_video is not None:
         temp_dosya_temizle(temp_check_path)
 
     if detected >= 1.0:
-        sure_saniye = int(round(detected))
-        st.success(f"⏱️ Otomatik tespit edilen video süresi: {sure_saniye} saniye")
+        # ✅ AI hedef süresi: tespit edilen süreyi AŞAĞI yuvarla
+        # Örnek: 13.6 -> 13
+        sure_saniye = max(MIN_SURE_SANIYE, int(math.floor(detected + 0.0001)))
+        st.success(
+            f"⏱️ Tespit edilen süre: {detected:.2f} sn | "
+            f"AI hedef süre: {sure_saniye} sn (aşağı yuvarlandı)"
+        )
     else:
         st.warning("⚠️ Videonun süresi otomatik okunamadı! Lütfen videonun süresini saniye cinsinden belirtin:")
-        sure_saniye = int(st.number_input("⏱️ Manuel Süre Girişi (sn)", min_value=MIN_SURE_SANIYE, max_value=MAX_SURE_SANIYE, value=30, step=1, key="manual_sure_input"))
+        sure_saniye = int(st.number_input(
+            "⏱️ Manuel Süre Girişi (sn)",
+            min_value=MIN_SURE_SANIYE,
+            max_value=MAX_SURE_SANIYE,
+            value=30,
+            step=1,
+            key="manual_sure_input"
+        ))
 
 c1, c2 = st.columns(2)
 with c1:
@@ -209,7 +221,7 @@ window.addEventListener('beforeunload', window._otoxtra_beforeunload);
         f.write(uploaded_video.getvalue())
 
     try:
-        log_ekle(f"⏱️ İşlenen video süresi: {sure_saniye} saniye")
+        log_ekle(f"⏱️ AI hedef video süresi: {sure_saniye} saniye")
 
         # ADIM 1: Video Analiz
         ilerlemeyi_guncelle(1, 4, "🎥 Video analiz ediliyor...")
