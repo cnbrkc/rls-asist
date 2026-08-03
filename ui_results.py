@@ -41,20 +41,18 @@ def render_results(log_ekle, router) -> None:
 
     st.markdown("### 🎬 Hazır Video (AI Sesli)")
     st.markdown("**📺 AI Ses Eklenmiş Video** (Orijinal video + AI seslendirme)")
-    
+
     if sonuc.get("final_video") and os.path.exists(sonuc["final_video"]):
-        # ✅ ÖNİZLEME TOGGLE - Varsayılan kapalı
+        with open(sonuc["final_video"], "rb") as f:
+            vid_bytes = f.read()
+
+        # Önizleme varsayılan gizli
         show_generated = st.toggle("👁️ Üretilen Videoyu Göster", value=False, key="show_generated_video")
-        
         if show_generated:
-            with open(sonuc["final_video"], "rb") as f:
-                vid_bytes = f.read()
             st.video(vid_bytes)
 
         c_dl, c_share = st.columns(2)
         with c_dl:
-            with open(sonuc["final_video"], "rb") as f:
-                vid_bytes = f.read()
             st.download_button(
                 "⬇️ İndir (.mp4)",
                 vid_bytes,
@@ -63,7 +61,6 @@ def render_results(log_ekle, router) -> None:
                 use_container_width=True
             )
         with c_share:
-            # Web Share API → iOS'ta "Videoyu Kaydet" = Fotoğraflara gider
             vid_b64 = base64.b64encode(vid_bytes).decode()
             components.html(f"""
 <button onclick="shareVideo()" style="
@@ -158,13 +155,12 @@ async function shareVideo() {{
     st.markdown("### 🎙️ Seslendirme Metni")
     st.caption("TTS için üretilen metin. Düzenleyip yeniden ses ve video üretebilirsiniz.")
 
-    # Sonuç değiştiyse (yeni üretim veya geçmiş tıklama) widget key'i temizle
+    # Sonuç değiştiyse widget key'i temizle
     if st.session_state._sonuc_versiyon != st.session_state._sonuc_versiyon_last:
         st.session_state._sonuc_versiyon_last = st.session_state._sonuc_versiyon
         if "duzenlenmis_ses_metni_widget" in st.session_state:
             del st.session_state["duzenlenmis_ses_metni_widget"]
 
-    # value parametresi: key yoksa AI metnini, varsa session_state'teki kullanıcı düzenlemesini kullan
     duzenlenmis_ses_metni = st.text_area(
         "Seslendirme Metni",
         value=st.session_state.get("duzenlenmis_ses_metni_widget", veri.get("seslendirme_metni", "")),
@@ -196,11 +192,16 @@ async function shareVideo() {{
                 temp_input_video = sonuc.get("temp_input_video", "")
                 if temp_input_video and os.path.exists(temp_input_video):
                     yeni_output_video = gecici_dosya_yolu("output", "mp4")
+
+                    # Ana ekranda seçilen kaliteyi kullan
+                    upscale_hedef = int(st.session_state.get("upscale_hedef_y", 1440))
+
                     render_basarili = video_ve_sesi_birlestir(
                         temp_input_video,
                         yeni_ses_dosyasi,
                         yeni_output_video,
-                        log_ekle
+                        log_ekle,
+                        hedef_y=upscale_hedef
                     )
                     if render_basarili and os.path.exists(yeni_output_video):
                         # Eski videoyu temizle
@@ -208,6 +209,7 @@ async function shareVideo() {{
                         if eski_video and os.path.exists(eski_video):
                             temp_dosya_temizle(eski_video)
                         st.session_state.sonuc["final_video"] = yeni_output_video
+                        st.session_state.sonuc["upscale_hedef_y"] = upscale_hedef
                         log_ekle("✅ Yeni video başarıyla üretildi.")
                     else:
                         log_ekle("⚠️ Video birleştirme başarısız, sadece ses güncellendi.")
