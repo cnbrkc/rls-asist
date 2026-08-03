@@ -21,11 +21,13 @@ def _ffmpeg_yolu_bul() -> str:
     try:
         import imageio_ffmpeg
         return imageio_ffmpeg.get_ffmpeg_exe()
-    except (ImportError, Exception):
+    except Exception:
         pass
+
     sistem_ffmpeg = shutil.which("ffmpeg")
     if sistem_ffmpeg:
         return sistem_ffmpeg
+
     return "ffmpeg"
 
 FFMPEG_BIN = _ffmpeg_yolu_bul()
@@ -63,16 +65,19 @@ def eski_ses_dosyalarini_temizle() -> None:
     import time
     now = time.time()
     temizlenecekler = []
+
     for dosya_yolu in st.session_state.get("gecici_ses_dosyalari", []):
         if not os.path.exists(dosya_yolu):
             temizlenecekler.append(dosya_yolu)
             continue
+
         try:
             if now - os.path.getmtime(dosya_yolu) > SES_OMRU_SANIYE:
                 if temp_dosya_temizle(dosya_yolu):
                     temizlenecekler.append(dosya_yolu)
         except Exception:
             temizlenecekler.append(dosya_yolu)
+
     for dosya in temizlenecekler:
         if dosya in st.session_state.gecici_ses_dosyalari:
             st.session_state.gecici_ses_dosyalari.remove(dosya)
@@ -91,12 +96,15 @@ def sesi_hizlandir(giris_dosyasi: str, cikti_dosyasi: str, hiz_carpani: float, l
     if hiz_carpani < 0.5 or hiz_carpani > 2.0:
         carpanlar = []
         kalan = hiz_carpani
+
         while kalan > 2.0:
             carpanlar.append(2.0)
             kalan /= 2.0
+
         while kalan < 0.5:
             carpanlar.append(0.5)
             kalan /= 0.5
+
         carpanlar.append(round(kalan, 4))
         atempo_str = ",".join(f"atempo={c}" for c in carpanlar)
     else:
@@ -108,6 +116,7 @@ def sesi_hizlandir(giris_dosyasi: str, cikti_dosyasi: str, hiz_carpani: float, l
         "-ar", str(SES_ORNEK_HIZI), "-ac", str(SES_KANAL), "-sample_fmt", "s16",
         cikti_dosyasi
     ]
+
     try:
         sonuc = subprocess.run(komut, capture_output=True, text=True, timeout=120)
         if sonuc.returncode != 0:
@@ -202,6 +211,14 @@ def video_ve_sesi_birlestir(
 ) -> bool:
     """Videoya AI sesini ekle + seçilen upscale + sese uyum için video yavaşlatma (KESME YOK)"""
 
+    if not os.path.exists(video_yolu):
+        log_ekle("⚠️ Video dosyası bulunamadı.")
+        return False
+
+    if not os.path.exists(ses_yolu):
+        log_ekle("⚠️ Ses dosyası bulunamadı.")
+        return False
+
     # Video bilgilerini al
     bilgi = _video_bilgi_al(video_yolu)
     genislik, yukseklik = bilgi["width"], bilgi["height"]
@@ -250,6 +267,7 @@ def video_ve_sesi_birlestir(
     # Upscale
     if hedef_cozunurluk != yukseklik:
         vf_parcalari.append(f"scale={hedef_x}:{hedef_cozunurluk}:flags=lanczos")
+
         if hedef_cozunurluk >= 2160:
             log_ekle(f"🎬 4K Upscale: {genislik}x{yukseklik} → {hedef_x}x{hedef_cozunurluk}")
         elif hedef_cozunurluk >= 1440:
@@ -304,6 +322,7 @@ def video_ve_sesi_birlestir(
 
     try:
         sonuc = subprocess.run(komut, capture_output=True, text=True, timeout=ffmpeg_timeout)
+
         if sonuc.returncode != 0:
             log_ekle(f"⚠️ ffmpeg hata: {sonuc.stderr[-300:] if sonuc.stderr else 'bilinmeyen'}")
 
@@ -336,6 +355,7 @@ def video_ve_sesi_birlestir(
             ]
 
             fallback_sonuc = subprocess.run(fallback_komut, capture_output=True, text=True, timeout=ffmpeg_timeout)
+
             if fallback_sonuc.returncode != 0:
                 log_ekle(f"⚠️ Fallback ffmpeg hata: {fallback_sonuc.stderr[-300:] if fallback_sonuc.stderr else 'bilinmeyen'}")
                 return False
