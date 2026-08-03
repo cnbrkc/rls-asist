@@ -25,17 +25,16 @@ from ui_results import render_results
 # SAYFA AYARLARI
 # ============================================================
 st.set_page_config(page_title="otoXtra", page_icon="🏎️", layout="wide")
-
 st.markdown("""
 <style>
-    .main .block-container { padding-top: 1rem; padding-bottom: 1rem; }
-    .stTextArea textarea { font-size: 14px; }
-    .stButton button { width: 100%; height: 48px; font-size: 16px; font-weight: 600; }
-    [data-testid="stCaptionContainer"] { font-size: 12px; margin-bottom: 0.25rem; }
-    [data-testid="stVideo"] video { max-height: 200px; }
-    .streamlit-expanderHeader { font-size: 14px; }
-    .gecmis-item { padding: 8px; margin: 4px 0; border-radius: 6px; cursor: pointer; }
-    .gecmis-item:hover { background-color: #f0f0f0; }
+.main .block-container { padding-top: 1rem; padding-bottom: 1rem; }
+.stTextArea textarea { font-size: 14px; }
+.stButton button { width: 100%; height: 48px; font-size: 16px; font-weight: 600; }
+[data-testid="stCaptionContainer"] { font-size: 12px; margin-bottom: 0.25rem; }
+[data-testid="stVideo"] video { max-height: 200px; }
+.streamlit-expanderHeader { font-size: 14px; }
+.gecmis-item { padding: 8px; margin: 4px 0; border-radius: 6px; cursor: pointer; }
+.gecmis-item:hover { background-color: #f0f0f0; }
 </style>
 <link rel="manifest" href="/app/static/manifest.json">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -80,12 +79,17 @@ uploaded_video = st.file_uploader(
     help="Videoyu yüklersiniz; süre otomatik tespit edilir ve ses buna göre ayarlanır.",
     key="video_uploader"
 )
-video_buyuk = uploaded_video is not None and uploaded_video.size > MAX_VIDEO_BOYUT
 
+video_buyuk = uploaded_video is not None and uploaded_video.size > MAX_VIDEO_BOYUT
 sure_saniye = 30  # Varsayılan
 
 if uploaded_video is not None:
-    st.video(uploaded_video)
+    # ✅ ÖNİZLEME TOGGLE - Varsayılan kapalı
+    show_uploaded = st.toggle("👁️ Yüklenen Videoyu Göster", value=False, key="show_uploaded_video")
+    
+    if show_uploaded:
+        st.video(uploaded_video)
+    
     if video_buyuk:
         st.warning("⚠️ Video 50 MB üstü! Sıkıştırmanız önerilir.")
 
@@ -135,6 +139,7 @@ icerik_tonu = st.radio(
 )
 
 buton_tiklandi = st.button("🚀 ÜRET!", disabled=uploaded_video is None, use_container_width=True)
+
 if uploaded_video is None:
     st.info("💡 Devam etmek için lütfen yukarıdan bir video yükleyin.")
 
@@ -156,8 +161,7 @@ def log_ekle(satir: str) -> None:
 
 def ilerlemeyi_guncelle(adim: int, toplam: int, mesaj: str) -> None:
     progress_bar.progress(adim / toplam, text=mesaj)
-
-gunlugu_ciz()
+    gunlugu_ciz()
 
 # ============================================================
 # ÜRETİM AKIŞI
@@ -165,28 +169,28 @@ gunlugu_ciz()
 if buton_tiklandi and uploaded_video is not None:
     # Wake Lock + beforeunload: İşlem sırasında ekranı açık tut, sayfadan ayrılma uyarısı
     components.html("""
-    <script>
-    // Wake Lock API (ekranı açık tutar)
-    window._otoxtra_wakeLock = null;
-    async function requestWakeLock() {
-        try {
-            if ('wakeLock' in navigator) {
-                window._otoxtra_wakeLock = await navigator.wakeLock.request('screen');
-                console.log('otoXtra: Wake Lock aktif');
-            }
-        } catch(e) { console.log('otoXtra: Wake Lock hatası:', e); }
-    }
-    requestWakeLock();
+<script>
+// Wake Lock API (ekranı açık tutar)
+window._otoxtra_wakeLock = null;
+async function requestWakeLock() {
+    try {
+        if ('wakeLock' in navigator) {
+            window._otoxtra_wakeLock = await navigator.wakeLock.request('screen');
+            console.log('otoXtra: Wake Lock aktif');
+        }
+    } catch(e) { console.log('otoXtra: Wake Lock hatası:', e); }
+}
+requestWakeLock();
 
-    // beforeunload: Sayfadan ayrılmak isteyince uyarı
-    window._otoxtra_beforeunload = function(e) {
-        e.preventDefault();
-        e.returnValue = 'otoXtra üretim devam ediyor! Çıkmak istediğinize emin misiniz?';
-        return e.returnValue;
-    };
-    window.addEventListener('beforeunload', window._otoxtra_beforeunload);
-    </script>
-    """, height=0)
+// beforeunload: Sayfadan ayrılmak isteyince uyarı
+window._otoxtra_beforeunload = function(e) {
+    e.preventDefault();
+    e.returnValue = 'otoXtra üretim devam ediyor! Çıkmak istediğinize emin misiniz?';
+    return e.returnValue;
+};
+window.addEventListener('beforeunload', window._otoxtra_beforeunload);
+</script>
+""", height=0)
 
     st.warning("⚡ **Üretim devam ediyor — bu sayfadan ayrılmayın!** Ekran açık kalacak.", icon="⚠️")
 
@@ -210,7 +214,6 @@ if buton_tiklandi and uploaded_video is not None:
         # ADIM 1: Video Analiz
         ilerlemeyi_guncelle(1, 4, "🎥 Video analiz ediliyor...")
         log_ekle("🎥 Video analiz ediliyor...")
-
         analiz_metni, _ = router.video_analiz_et(
             uploaded_video.getvalue(),
             uploaded_video.type or "video/mp4",
@@ -230,7 +233,6 @@ if buton_tiklandi and uploaded_video is not None:
         # ADIM 2: Metin Üretimi
         ilerlemeyi_guncelle(2, 4, "✍️ Metin üretiliyor...")
         system_prompt = kurallari_oku() + sistem_talimati_olustur(sure_saniye, icerik_tonu)
-
         veri, kullanilan_metin_modeli = router.metin_uret(video_icerigi, system_prompt, METIN_SCHEMA, log_ekle, arama_kullan=False)
 
         # ADIM 3: Threads Üretimi
@@ -274,7 +276,6 @@ if buton_tiklandi and uploaded_video is not None:
         # VİDEO + SES BİRLEŞTİRME
         log_ekle("🎬 Videoya AI sesi ekleniyor...")
         output_video_path = gecici_dosya_yolu("output", "mp4")
-
         render_basarili = video_ve_sesi_birlestir(
             temp_input_video,
             ses_dosyasi,
@@ -289,17 +290,17 @@ if buton_tiklandi and uploaded_video is not None:
 
         # Wake Lock + beforeunload serbest bırak
         components.html("""
-        <script>
-        if (window._otoxtra_wakeLock) {
-            window._otoxtra_wakeLock.release();
-            window._otoxtra_wakeLock = null;
-        }
-        if (window._otoxtra_beforeunload) {
-            window.removeEventListener('beforeunload', window._otoxtra_beforeunload);
-            window._otoxtra_beforeunload = null;
-        }
-        </script>
-        """, height=0)
+<script>
+if (window._otoxtra_wakeLock) {
+    window._otoxtra_wakeLock.release();
+    window._otoxtra_wakeLock = null;
+}
+if (window._otoxtra_beforeunload) {
+    window.removeEventListener('beforeunload', window._otoxtra_beforeunload);
+    window._otoxtra_beforeunload = null;
+}
+</script>
+""", height=0)
 
         kayit_ekle({
             "seslendirme_metni": veri.get("seslendirme_metni", ""),
