@@ -124,20 +124,54 @@ def sesi_hizlandir(giris_dosyasi: str, cikti_dosyasi: str, hiz_carpani: float, l
 # ===== VİDEO BİLGİ ALMA =====
 def _video_bilgi_al(video_yolu: str) -> dict:
     """Video metadata: fps, frames, width, height, duration. Hata olursa varsayılan döner."""
-    bilgi = {"fps": 0, "frames": 0, "width": 1920, "height": 1080, "duration": 0.0}
+    import re  # Regex modülünü yerel olarak import et
+    
+    bilgi = {"fps": 0.0, "frames": 0, "width": 1920, "height": 1080, "duration": 0.0}
+    
+    # 1. Önce OpenCV ile temel bilgileri (genişlik, yükseklik) almaya çalış
     try:
         import cv2
         cap = cv2.VideoCapture(video_yolu)
         if cap.isOpened():
-            bilgi["fps"] = cap.get(cv2.CAP_PROP_FPS)
-            bilgi["frames"] = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+            bilgi["fps"] = float(cap.get(cv2.CAP_PROP_FPS))
+            bilgi["frames"] = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             bilgi["width"] = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             bilgi["height"] = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             cap.release()
-            if bilgi["fps"] > 0 and bilgi["frames"] > 0:
-                bilgi["duration"] = bilgi["frames"] / bilgi["fps"]
     except Exception:
         pass
+
+    # 2. Kesin süre tespiti için FFMPEG kullan (OpenCV frame_count çoğu MP4/MOV/WebM'de hatalı döner)
+    try:
+        komut = [FFMPEG_BIN, "-i", video_yolu, "-hide_banner"]
+        sonuc = subprocess.run(komut, capture_output=True, text=True, timeout=30)
+        
+        # Süreyi bul (Format: HH:MM:SS.ms)
+        sure_match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", sonuc.stderr)
+        if sure_match:
+            h, m, s = map(float, sure_match.groups())
+            bilgi["duration"] = h * 3600 + m * 60 + s
+            
+        # Eğer OpenCV fps'i bulamadıysa, ffmpeg çıktısından fps'i bulmaya çalış
+        if bilgi["fps"] <= 0:
+            fps_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:fps|tbr)", sonuc.stderr)
+            if fps_match:
+                bilgi["fps"] = float(fps_match.group(1))
+                
+        # Eğer OpenCV genişlik/yükseklik bulamadıysa, ffmpeg'den al
+        if bilgi["width"] <= 0 or bilgi["height"] <= 0:
+            coz_match = re.search(r"(\d{2,5})x(\d{2,5})", sonuc.stderr)
+            if coz_match:
+                bilgi["width"] = int(coz_match.group(1))
+                bilgi["height"] = int(coz_match.group(2))
+                
+    except Exception:
+        pass
+
+    # Eğer OpenCV frame sayısını doğru bulduysa ama süre hala 0 ise hesapla (Fallback)
+    if bilgi["duration"] <= 0 and bilgi["fps"] > 0 and bilgi["frames"] > 0:
+        bilgi["duration"] = bilgi["frames"] / bilgi["fps"]
+
     return bilgi
 
 def video_suresini_al(video_yolu: str) -> float:
