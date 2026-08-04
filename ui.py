@@ -11,12 +11,13 @@ from config import (
     API_KEYS, SES_HIZ_CARPANI, MAX_INPUT_KARAKTER, METIN_MODELLERI,
     VIDEO_FORMATLARI, MAX_VIDEO_BOYUT, MIN_SURE_SANIYE, MAX_SURE_SANIYE,
     TON_EGLENCE, TON_DENGELI, TON_BILGI, TON_TEKNIK,
-    METIN_SCHEMA,
+    METIN_SCHEMA, KELIME_HIZI_ORANI,
 )
 from storage import kayit_ekle
 from media import (
     eski_ses_dosyalarini_temizle, temp_dosya_temizle, video_suresini_al,
     video_ve_sesi_birlestir, gecici_dosya_yolu, gecici_ses_yolu,
+    _ses_suresini_al,
 )
 from prompts import prompt_dosyasini_oku, kurallari_oku, sistem_talimati_olustur
 from router import SmartRouter
@@ -61,8 +62,6 @@ st.markdown("""
 <meta name="theme-color" content="#ff4b4b">
 """, unsafe_allow_html=True)
 
-# Başlık ve caption kaldırıldı: daha kompakt ana ekran
-
 # ============================================================
 # SESSION STATE BAŞLATMA
 # ============================================================
@@ -88,10 +87,6 @@ eski_ses_dosyalarini_temizle()
 # YARDIMCI: UPLOAD DOSYASINI GEÇİCİ DOSYAYA YAZ
 # ============================================================
 def upload_dosyasini_kaydet(upload_obj, hedef_yol: str) -> None:
-    """
-    UploadedFile'ı mümkün olduğunca stream olarak diske yazar.
-    Böylece büyük dosyalarda gereksiz bellek yükü azaltılır.
-    """
     try:
         upload_obj.seek(0)
         with open(hedef_yol, "wb") as f:
@@ -121,7 +116,7 @@ uploaded_video = st.file_uploader(
 )
 
 video_buyuk = uploaded_video is not None and uploaded_video.size > MAX_VIDEO_BOYUT
-sure_saniye = 30  # Varsayılan
+sure_saniye = 30
 
 if uploaded_video is not None:
     # Önizleme varsayılan gizli
@@ -157,7 +152,6 @@ if uploaded_video is not None:
 
     if detected >= 1.0:
         # ✅ AI hedef süresi: tespit edilen süreyi AŞAĞI yuvarla
-        # Örnek: 13.6 -> 13
         sure_saniye = max(MIN_SURE_SANIYE, int(math.floor(detected + 0.0001)))
         st.success(
             f"⏱️ Tespit edilen süre: {detected:.2f} sn | "
@@ -270,22 +264,20 @@ async function requestWakeLock() {
     try {
         if ('wakeLock' in navigator) {
             window._otoxtra_wakeLock = await navigator.wakeLock.request('screen');
-            console.log('otoXtra: Wake Lock aktif');
         }
-    } catch(e) { console.log('otoXtra: Wake Lock hatası:', e); }
+    } catch(e) {}
 }
 requestWakeLock();
-
 window._otoxtra_beforeunload = function(e) {
     e.preventDefault();
-    e.returnValue = 'otoXtra üretim devam ediyor! Çıkmak istediğinize emin misiniz?';
+    e.returnValue = 'otoXtra üretim devam ediyor!';
     return e.returnValue;
 };
 window.addEventListener('beforeunload', window._otoxtra_beforeunload);
 </script>
 """, height=0)
 
-    st.warning("⚡ **Üretim devam ediyor — bu sayfadan ayrılmayın!** Ekran açık kalacak.", icon="⚠️")
+    st.warning("⚡ **Üretim devam ediyor — bu sayfadan ayrılmayın!**", icon="⚠️")
 
     # Önceki üretimden kalan geçici video dosyasını temizle
     if st.session_state.sonuc and st.session_state.sonuc.get("temp_input_video"):
@@ -318,7 +310,11 @@ window.addEventListener('beforeunload', window._otoxtra_beforeunload);
             log_ekle
         )
 
-        video_icerigi = f"VİDEO ANALİZ SONUCU:\n{analiz_metni}\n\nMETİN ÜRETİM NOTLARI:\n{metin_uretim_notlari.strip() if metin_uretim_notlari.strip() else 'Ek not yok.'}"
+        video_icerigi = (
+            f"VİDEO ANALİZ SONUCU:\n{analiz_metni}\n\n"
+            f"METİN ÜRETİM NOTLARI:\n"
+            f"{metin_uretim_notlari.strip() if metin_uretim_notlari.strip() else 'Ek not yok.'}"
+        )
 
         if len(video_icerigi) > MAX_INPUT_KARAKTER:
             kirpilmis = video_icerigi[:MAX_INPUT_KARAKTER]
@@ -329,14 +325,24 @@ window.addEventListener('beforeunload', window._otoxtra_beforeunload);
         # ADIM 2: Metin Üretimi
         ilerlemeyi_guncelle(2, 4, "✍️ Metin üretiliyor...")
         system_prompt = kurallari_oku() + sistem_talimati_olustur(sure_saniye, icerik_tonu)
-        veri, kullanilan_metin_modeli = router.metin_uret(video_icerigi, system_prompt, METIN_SCHEMA, log_ekle, arama_kullan=False)
+        veri, kullanilan_metin_modeli = router.metin_uret(
+            video_icerigi, system_prompt, METIN_SCHEMA, log_ekle, arama_kullan=False
+        )
 
         # ADIM 3: Threads Üretimi
         ilerlemeyi_guncelle(3, 4, "🧵 Threads üretiliyor...")
         log_ekle("🧵 Threads üretiliyor...")
-        threads_icerigi = f"INSTAGRAM AÇIKLAMASI:\n{veri.get('reels_aciklamasi', '')}\n\nGÖREV: Bu Instagram açıklamasını Threads ve X için daha sohbet havasında, kısa ve akıcı bir metne dönüştür."
+        threads_icerigi = (
+            f"INSTAGRAM AÇIKLAMASI:\n{veri.get('reels_aciklamasi', '')}\n\n"
+            f"GÖREV: Bu Instagram açıklamasını Threads ve X için daha sohbet havasında, "
+            f"kısa ve akıcı bir metne dönüştür."
+        )
         threads_system_prompt = prompt_dosyasini_oku("threads_promptu.txt")
-        threads_schema = {"type": "OBJECT", "properties": {"threads_aciklamasi": {"type": "STRING"}}, "required": ["threads_aciklamasi"]}
+        threads_schema = {
+            "type": "OBJECT",
+            "properties": {"threads_aciklamasi": {"type": "STRING"}},
+            "required": ["threads_aciklamasi"]
+        }
 
         try:
             threads_veri, kullanilan_threads_modeli = router.metin_uret(
@@ -349,7 +355,7 @@ window.addEventListener('beforeunload', window._otoxtra_beforeunload);
             )
             veri["threads_aciklamasi"] = str(threads_veri.get("threads_aciklamasi", "")).strip()
         except Exception as threads_hata:
-            log_ekle(f"⚠️ Threads hatası, fallback kullanılıyor: {str(threads_hata)[:100]}")
+            log_ekle(f"⚠️ Threads hatası, fallback: {str(threads_hata)[:100]}")
             fallback = re.sub(r"\s+", " ", veri.get("reels_aciklamasi", "")).strip()
             veri["threads_aciklamasi"] = fallback[:500].rstrip()
             kullanilan_threads_modeli = "fallback"
@@ -369,6 +375,69 @@ window.addEventListener('beforeunload', window._otoxtra_beforeunload);
         if ses_basarili and os.path.exists(ses_dosyasi):
             st.session_state.gecici_ses_dosyalari.append(ses_dosyasi)
 
+        # ============================================================
+        # SES SÜRESİ KONTROLÜ + FALLBACK
+        # ============================================================
+        if ses_basarili and os.path.exists(ses_dosyasi):
+            uretilen_ses_sure = _ses_suresini_al(ses_dosyasi)
+            log_ekle(
+                f"🎧 Üretilen ses süresi: {uretilen_ses_sure:.2f}s | "
+                f"Video hedef: {sure_saniye}s"
+            )
+
+            # Eğer ses, hedef sürenin %80'inden kısaysa fallback tetikle
+            if uretilen_ses_sure < (sure_saniye * 0.80):
+                log_ekle("⚠️ Ses çok kısa kaldı. Metin kelime hedefi artırılıp yeniden üretiliyor...")
+
+                # Kelime hedefini %35 artır
+                fallback_kelime_orani = KELIME_HIZI_ORANI * 1.35
+
+                system_prompt_fallback = (
+                    kurallari_oku() +
+                    sistem_talimati_olustur(
+                        sure_saniye,
+                        icerik_tonu,
+                        kelime_hizi_orani=fallback_kelime_orani
+                    )
+                )
+
+                log_ekle(f"🔁 Yeni kelime hedefi oranı: {fallback_kelime_orani:.2f}")
+
+                try:
+                    veri, kullanilan_metin_modeli = router.metin_uret(
+                        video_icerigi,
+                        system_prompt_fallback,
+                        METIN_SCHEMA,
+                        log_ekle,
+                        arama_kullan=False
+                    )
+
+                    # Eski ses dosyasını temizle
+                    if os.path.exists(ses_dosyasi):
+                        temp_dosya_temizle(ses_dosyasi)
+                    if ses_dosyasi in st.session_state.gecici_ses_dosyalari:
+                        st.session_state.gecici_ses_dosyalari.remove(ses_dosyasi)
+
+                    # Yeni ses üret
+                    ses_dosyasi = gecici_ses_yolu()
+                    ses_basarili, kullanilan_ses_modeli = router.ses_uret(
+                        veri["seslendirme_metni"],
+                        secilen_ses_ingilizce,
+                        ses_dosyasi,
+                        log_ekle,
+                        hiz_carpani=SES_HIZ_CARPANI
+                    )
+
+                    if ses_basarili and os.path.exists(ses_dosyasi):
+                        st.session_state.gecici_ses_dosyalari.append(ses_dosyasi)
+                        yeni_ses_sure = _ses_suresini_al(ses_dosyasi)
+                        log_ekle(f"✅ Fallback sonrası yeni ses süresi: {yeni_ses_sure:.2f}s")
+                    else:
+                        log_ekle("⚠️ Fallback ses üretimi başarısız. İlk ses kullanılacak.")
+
+                except Exception as fallback_hata:
+                    log_ekle(f"⚠️ Fallback metin üretimi hatası: {str(fallback_hata)[:200]}")
+
         # VİDEO + SES BİRLEŞTİRME
         log_ekle("🎬 Videoya AI sesi ekleniyor...")
         output_video_path = gecici_dosya_yolu("output", "mp4")
@@ -385,7 +454,7 @@ window.addEventListener('beforeunload', window._otoxtra_beforeunload);
         log_ekle("🏁 Tamamlandı.")
         ilerlemeyi_guncelle(4, 4, "✅ Tamamlandı!")
 
-        # Wake Lock + beforeunload serbest bırak
+        # Wake Lock serbest bırak
         components.html("""
 <script>
 if (window._otoxtra_wakeLock) {
