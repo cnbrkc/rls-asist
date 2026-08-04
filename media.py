@@ -15,6 +15,14 @@ from config import (
     SES_ORNEK_HIZI, SES_KANAL, SES_GENISLIK,
 )
 
+# ===== AYARLAR =====
+# Düşük çözünürlüklü videoları çok fazla büyütmeyi engeller
+MAKS_UPSCALE_CARPANI = 2.0
+
+# Video hızlandırma / yavaşlatma limitleri
+MAKS_VIDEO_HIZLANDIRMA = 1.5   # Video en fazla 1.5x hızlandırılabilir
+MIN_VIDEO_YAVASLATMA = 0.5     # Video en fazla 0.5x yavaşlatılabilir
+
 # ===== FFMPEG YOLU (Streamlit Cloud uyumlu) =====
 def _ffmpeg_yolu_bul() -> str:
     """Streamlit Cloud'da ffmpeg yolunu bul (önce imageio-ffmpeg, sonra sistem PATH)"""
@@ -201,7 +209,7 @@ def _ses_suresini_al(ses_yolu: str) -> float:
         pass
     return 0.0
 
-# ===== VİDEO + SES BİRLEŞTİRME (UPSCALE + KESKİNLEŞTİRME + YAVAŞLATMA) =====
+# ===== VİDEO + SES BİRLEŞTİRME (UPSCALE + KESKİNLEŞTİRME + HIZ AYARI) =====
 def video_ve_sesi_birlestir(
     video_yolu: str,
     ses_yolu: str,
@@ -210,12 +218,13 @@ def video_ve_sesi_birlestir(
     hedef_y: int = HEDEF_2K_Y
 ) -> bool:
     """
-    Videoya AI sesini ekle + seçilen upscale + sese uyum için video yavaşlatma.
+    Videoya AI sesini ekle + seçilen upscale + sese uyum için video hız ayarı.
+
     Yeni mantık:
-      1) Önce video hedef süreye göre yavaşlatılır (setpts)
-      2) Sonra upscale yapılır (scale)
-      3) En son keskinleştirme yapılır (unsharp)
-    Dikey/yatay videolarda kısa kenara göre upscale yapılır.
+      - Ses her zaman 1.2x hızda kalır.
+      - Ses videodan uzunsa video yavaşlatılır.
+      - Ses videodan kısaysa video hızlandırılır.
+      - Çok aşırı fark varsa limit uygulanır ve kalan boşluk sessizlikle doldurulur.
     """
 
     if not os.path.exists(video_yolu):
@@ -237,59 +246,69 @@ def video_ve_sesi_birlestir(
     video_sure = bilgi["duration"] if bilgi["duration"] > 0 else 30.0
     ses_sure = _ses_suresini_al(ses_yolu)
 
-    # ✅ Ses süresini güvenlik için ÜST tam sayıya yuvarla
-    # Örnek: 15.7 -> 16
-    hedef_ses_suresi = 0
+    # Hedef süre: ses süresini üst tam sayıya yuvarla
     if ses_sure > 0:
-        hedef_ses_suresi = math.ceil(ses_sure - 0.001)
-        if hedef_ses_suresi < 1:
-            hedef_ses_suresi = 1
-
-    # Final hedef süre: video süresi ve üst yuvarlanmış ses süresinden büyük olanı seç
-    hedef_sure = max(video_sure, float(hedef_ses_suresi), ses_sure)
+        hedef_sure = math.ceil(ses_sure - 0.001)
+        if hedef_sure < 1:
+            hedef_sure = 1
+    else:
+        hedef_sure = video_sure
 
     log_ekle(
         f"⏱️ Video: {video_sure:.2f}s | "
         f"Ses: {ses_sure:.2f}s | "
-        f"Ses üst hedef: {float(hedef_ses_suresi):.2f}s | "
-        f"Final hedef: {hedef_sure:.2f}s"
+        f"Hedef süre: {hedef_sure:.2f}s"
     )
 
     # ============================================================
-    # 1) ÖNCE YAVAŞLATMA HESAPLA
+    # 1) VİDEO HIZ AYARI
     # ============================================================
-    video_yavaslatma = 1.0
+    video_hiz_carpani = 1.0
 
-    if hedef_sure > video_sure + 0.0001:
-        if hedef_sure > video_sure * 3:
-            log_ekle("⚠️ Dikkat: Hedef süre videonun 3 katından fazla. Video çok yavaşlayacak.")
+    if hedef_sure > video_sure:
+        # Ses videodan uzun → videoyu yavaşlat
+        video_hiz_carpani = video_sure / hedef_sure
 
-        video_yavaslatma = video_sure / hedef_sure
+        if video_hiz_carpani < MIN_VIDEO_YAVASLATMA:
+            video_hiz_carpani = MIN_VIDEO_YAVASLATMA
+            hedef_sure = video_sure / video_hiz_carpani
+            log_ekle("⚠️ Video çok fazla yavaşlatılacak, sınır uygulandı.")
 
-        yavas_video_sure = video_sure / video_yavaslatma
         log_ekle(
-            f"🎬 Video hedefe uyduruluyor: {video_yavaslatma:.3f}x → "
-            f"{video_sure:.2f}s → {yavas_video_sure:.2f}s"
+            f"🎬 Video yavaşlatılıyor: {video_hiz_carpani:.3f}x → "
+            f"{video_sure:.2f}s → {hedef_sure:.2f}s"
         )
+
+    elif hedef_sure < video_sure:
+        # Ses videodan kısa → videoyu hızlandır
+        video_hiz_carpani = video_sure / hedef_sure
+
+        if video_hiz_carpani > MAKS_VIDEO_HIZLANDIRMA:
+            video_hiz_carpani = MAKS_VIDEO_HIZLANDIRMA
+            hedef_sure = video_sure / video_hiz_carpani
+            log_ekle("⚠️ Video çok fazla hızlandırılacak, sınır uygulandı.")
+
+        log_ekle(
+            f"🎬 Video hızlandırılıyor: {video_hiz_carpani:.3f}x → "
+            f"{video_sure:.2f}s → {hedef_sure:.2f}s"
+        )
+
     else:
-        hedef_sure = video_sure
-        log_ekle("🎬 Video yavaşlatma gerekmedi (hedef süre videoya yakın veya kısa).")
+        log_ekle("🎬 Video hız ayarı gerekmedi.")
 
     # ============================================================
-    # YARDIMCI: HEDEF ÇÖZÜNÜRLÜK HESAPLA
+    # 2) UPSCALE HEDEFİ VE KAYNAK KALİTE KORUMASI
     # ============================================================
-    def calculate_target_resolution(target_short_edge):
+    secilen_hedef_kenar = int(hedef_y) if hedef_y else HEDEF_2K_Y
+    if secilen_hedef_kenar <= 0:
+        secilen_hedef_kenar = HEDEF_2K_Y
+
+    def apply_upscale_cap(target_short_edge):
         """
-        target_short_edge:
-          - None ise orijinal çözünürlük döner
-          - 1440 ise 2K mantığı
-          - 2160 ise 4K mantığı
-
-        Dikey videolarda kısa kenar genişliktir.
-        Yatay videolarda kısa kenar yüksekliktir.
+        Düşük çözünürlüklü kaynakları çok fazla büyütmeyi engeller.
         """
         if target_short_edge is None:
-            return genislik, yukseklik, False
+            return None
 
         try:
             target_short_edge = int(target_short_edge)
@@ -297,11 +316,40 @@ def video_ve_sesi_birlestir(
             target_short_edge = HEDEF_2K_Y
 
         if target_short_edge <= 0:
+            return target_short_edge
+
+        orijinal_kisa_kenar = min(genislik, yukseklik)
+        max_allowed = int(orijinal_kisa_kenar * MAKS_UPSCALE_CARPANI)
+        max_allowed = max(2, max_allowed)
+
+        if target_short_edge > max_allowed:
+            return max_allowed
+
+        return target_short_edge
+
+    hedef_kenar = apply_upscale_cap(secilen_hedef_kenar)
+
+    if hedef_kenar is None or hedef_kenar <= 0:
+        hedef_kenar = HEDEF_2K_Y
+
+    if hedef_kenar != secilen_hedef_kenar:
+        log_ekle(
+            f"⚠️ Kaynak çözünürlük düşük: kısa kenar {min(genislik, yukseklik)}px. "
+            f"Upscale hedefi {secilen_hedef_kenar}px → {hedef_kenar}px olarak sınırlandı "
+            f"({MAKS_UPSCALE_CARPANI:.1f}x limit)."
+        )
+
+    # ============================================================
+    # YARDIMCI: HEDEF ÇÖZÜNÜRLÜK HESAPLA
+    # ============================================================
+    def calculate_target_resolution(target_short_edge):
+        target_short_edge = apply_upscale_cap(target_short_edge)
+
+        if target_short_edge is None or target_short_edge <= 0:
             return genislik, yukseklik, False
 
         orijinal_kisa_kenar = min(genislik, yukseklik)
 
-        # Zaten hedef kısa kenara eşit veya daha büyükse upscale yapma
         if orijinal_kisa_kenar >= target_short_edge:
             return genislik, yukseklik, False
 
@@ -317,7 +365,6 @@ def video_ve_sesi_birlestir(
         out_w = max(2, out_w)
         out_h = max(2, out_h)
 
-        # ffmpeg çift sayı ister
         out_w += out_w % 2
         out_h += out_h % 2
 
@@ -329,15 +376,16 @@ def video_ve_sesi_birlestir(
     def build_vf(target_short_edge, unsharp=True):
         """
         Filtre sırası:
-          1) setpts  -> yavaşlatma
+          1) setpts  -> hızlandırma/yavaşlatma
           2) scale   -> upscale
           3) unsharp -> keskinleştirme
+          4) format  -> uyumluluk
         """
         vf_parts = []
 
-        # 1) Önce yavaşlatma
-        if video_yavaslatma < 0.999 and video_yavaslatma > 0:
-            setpts_carpani = round(1.0 / video_yavaslatma, 4)
+        # 1) Video hız ayarı
+        if abs(video_hiz_carpani - 1.0) > 0.001:
+            setpts_carpani = round(1.0 / video_hiz_carpani, 4)
             vf_parts.append(f"setpts=PTS*{setpts_carpani}")
 
         # 2) Upscale
@@ -347,17 +395,24 @@ def video_ve_sesi_birlestir(
 
         # 3) Keskinleştirme
         if unsharp:
-            vf_parts.append("unsharp=5:5:1.0:3:3:0.0")
+            orijinal_kisa = min(genislik, yukseklik)
+            hedef_kisa = min(out_w, out_h)
+            factor = hedef_kisa / orijinal_kisa if orijinal_kisa > 0 else 1.0
+
+            if orijinal_kisa < 720 or factor > 1.8:
+                vf_parts.append("unsharp=3:3:0.5:3:3:0.0")
+            else:
+                vf_parts.append("unsharp=5:5:1.0:3:3:0.0")
+
+        # 4) Format
+        if vf_parts:
+            vf_parts.append("format=yuv420p")
 
         return ",".join(vf_parts), out_w, out_h, upscaled
 
     # ============================================================
-    # 2) UPSCALE HEDEFİNİ BELİRLE
+    # 3) ANA VİDEO FİLTRESİNİ OLUŞTUR
     # ============================================================
-    hedef_kenar = int(hedef_y) if hedef_y else HEDEF_2K_Y
-    if hedef_kenar <= 0:
-        hedef_kenar = HEDEF_2K_Y
-
     vf_filtre, out_w, out_h, upscaled = build_vf(hedef_kenar, unsharp=True)
 
     if upscaled:
@@ -377,10 +432,10 @@ def video_ve_sesi_birlestir(
     log_ekle(f"🎛️ Video filtresi: {vf_filtre}")
 
     # 4K için daha hızlı preset ve daha uzun timeout
-    encode_preset = "veryfast" if hedef_kenar >= 2160 else VIDEO_PRESET
-    ffmpeg_timeout = 900 if hedef_kenar >= 2160 else 300
+    encode_preset = "veryfast" if secilen_hedef_kenar >= 2160 else VIDEO_PRESET
+    ffmpeg_timeout = 900 if secilen_hedef_kenar >= 2160 else 300
 
-    if hedef_kenar >= 2160 and video_sure > 120:
+    if secilen_hedef_kenar >= 2160 and video_sure > 120:
         log_ekle("⚠️ 4K + uzun video: işlem normalden uzun sürebilir.")
 
     # ============================================================
@@ -432,7 +487,7 @@ def video_ve_sesi_birlestir(
         # ============================================================
         # FALLBACK 1: 4K seçildiyse 2K'ya düş
         # ============================================================
-        fallback_hedef = 1440 if hedef_kenar >= 2160 else None
+        fallback_hedef = 1440 if secilen_hedef_kenar >= 2160 else None
 
         if fallback_hedef is not None:
             log_ekle(f"🔄 Fallback: {fallback_hedef}px upscale deneniyor...")
