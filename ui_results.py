@@ -193,15 +193,11 @@ async function shareVideo() {{
                 if temp_input_video and os.path.exists(temp_input_video):
                     yeni_output_video = gecici_dosya_yolu("output", "mp4")
 
-                    # Ana ekranda seçilen kaliteyi kullan
-                    upscale_hedef = int(st.session_state.get("upscale_hedef_y", 1440))
-
                     render_basarili = video_ve_sesi_birlestir(
                         temp_input_video,
                         yeni_ses_dosyasi,
                         yeni_output_video,
-                        log_ekle,
-                        hedef_y=upscale_hedef
+                        log_ekle
                     )
                     if render_basarili and os.path.exists(yeni_output_video):
                         # Eski videoyu temizle
@@ -209,7 +205,6 @@ async function shareVideo() {{
                         if eski_video and os.path.exists(eski_video):
                             temp_dosya_temizle(eski_video)
                         st.session_state.sonuc["final_video"] = yeni_output_video
-                        st.session_state.sonuc["upscale_hedef_y"] = upscale_hedef
                         log_ekle("✅ Yeni video başarıyla üretildi.")
                     else:
                         log_ekle("⚠️ Video birleştirme başarısız, sadece ses güncellendi.")
