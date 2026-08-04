@@ -77,8 +77,6 @@ if "_sonuc_versiyon_last" not in st.session_state:
     st.session_state._sonuc_versiyon_last = -1
 if "blacklist" not in st.session_state:
     st.session_state.blacklist = {}
-if "upscale_hedef_y" not in st.session_state:
-    st.session_state.upscale_hedef_y = 1440
 
 router = SmartRouter()
 eski_ses_dosyalarini_temizle()
@@ -151,7 +149,7 @@ if uploaded_video is not None:
         detected = st.session_state.get("upload_duration", 0.0)
 
     if detected >= 1.0:
-        # ✅ AI hedef süresi: tespit edilen süreyi AŞAĞI yuvarla
+        # AI hedef süresi: tespit edilen süreyi aşağı yuvarla
         sure_saniye = max(MIN_SURE_SANIYE, int(math.floor(detected + 0.0001)))
         st.success(
             f"⏱️ Tespit edilen süre: {detected:.2f} sn | "
@@ -185,37 +183,22 @@ if uploaded_video is not None:
             key="metin_uretim_notlari"
         )
 
-    # Ton ve kalite seçimleri yan yana
-    col_ton, col_upscale = st.columns([3, 2])
-
-    with col_ton:
-        ton_anahtarlari = [TON_EGLENCE, TON_DENGELI, TON_BILGI, TON_TEKNIK]
-        ton_kisa = {
-            TON_EGLENCE: "🎭 Eğlence",
-            TON_DENGELI: "⚖️ Dengeli",
-            TON_BILGI: "🧠 Bilgi",
-            TON_TEKNIK: "📊 Teknik",
-        }
-        icerik_tonu = st.radio(
-            "🎯 Ton",
-            ton_anahtarlari,
-            index=1,
-            format_func=lambda k: ton_kisa[k],
-            horizontal=True,
-            key="icerik_tonu"
-        )
-
-    with col_upscale:
-        upscale_secimi = st.radio(
-            "🎞️ Kalite",
-            ["2K", "4K"],
-            index=0,
-            horizontal=True,
-            help="Varsayılan: 2K. 4K daha kaliteli ama işlem süresi uzar."
-        )
-
-    upscale_hedef_y = 1440 if upscale_secimi == "2K" else 2160
-    st.session_state.upscale_hedef_y = upscale_hedef_y
+    # İçerik tonu
+    ton_anahtarlari = [TON_EGLENCE, TON_DENGELI, TON_BILGI, TON_TEKNIK]
+    ton_kisa = {
+        TON_EGLENCE: "🎭 Eğlence",
+        TON_DENGELI: "⚖️ Dengeli",
+        TON_BILGI: "🧠 Bilgi",
+        TON_TEKNIK: "📊 Teknik",
+    }
+    icerik_tonu = st.radio(
+        "🎯 Ton",
+        ton_anahtarlari,
+        index=1,
+        format_func=lambda k: ton_kisa[k],
+        horizontal=True,
+        key="icerik_tonu"
+    )
 
 else:
     st.session_state.pop("upload_key", None)
@@ -223,9 +206,6 @@ else:
     video_analiz_notlari = ""
     metin_uretim_notlari = ""
     icerik_tonu = TON_DENGELI
-    upscale_secimi = "2K"
-    upscale_hedef_y = 1440
-    st.session_state.upscale_hedef_y = upscale_hedef_y
 
 buton_tiklandi = st.button("🚀 ÜRET!", disabled=uploaded_video is None, use_container_width=True)
 
@@ -288,7 +268,6 @@ window.addEventListener('beforeunload', window._otoxtra_beforeunload);
     st.session_state.log_satirlari = []
     log_ekle("🚀 Üretim başladı...")
     log_ekle(f"⏱️ AI hedef video süresi: {sure_saniye} saniye")
-    log_ekle(f"🎞️ Upscale hedefi: {upscale_secimi} ({upscale_hedef_y}p)")
     ilerlemeyi_guncelle(0, 4, "Başlatılıyor...")
 
     temp_input_video = gecici_dosya_yolu("input", "mp4")
@@ -445,8 +424,7 @@ window.addEventListener('beforeunload', window._otoxtra_beforeunload);
             temp_input_video,
             ses_dosyasi,
             output_video_path,
-            log_ekle,
-            hedef_y=upscale_hedef_y
+            log_ekle
         )
 
         final_video_yolu = output_video_path if (render_basarili and os.path.exists(output_video_path)) else ""
@@ -488,7 +466,6 @@ if (window._otoxtra_beforeunload) {
             "kullanilan_threads_modeli": kullanilan_threads_modeli,
             "final_video": final_video_yolu,
             "temp_input_video": temp_input_video,
-            "upscale_hedef_y": upscale_hedef_y,
         }
         st.session_state._sonuc_versiyon += 1
 
