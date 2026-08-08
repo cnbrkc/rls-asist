@@ -137,7 +137,18 @@ class SmartRouter:
         return guvenli_json_yukle(getattr(response, "text", "")), info
 
     def ses_uret(self, metin: str, ses_adi: str, cikti_dosyasi: str, log_ekle, hiz_carpani: float = 1.0) -> Tuple[bool, Optional[str]]:
-        config = types.GenerateContentConfig(
+        # 🔥 GÜVENLİK FİLTRELERİNİ KAPAT (TTS metinleri yanlışlıkla bloklanmasın diye)
+        try:
+            safety_settings = [
+                types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HARASSMENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+            ]
+        except Exception:
+            safety_settings = None # Eski SDK versiyonları için fallback
+
+        config_kwargs = dict(
             response_modalities=["AUDIO"],
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
@@ -145,24 +156,58 @@ class SmartRouter:
                 )
             ),
         )
+        if safety_settings:
+            config_kwargs["safety_settings"] = safety_settings
+
+        config = types.GenerateContentConfig(**config_kwargs)
+        
         try:
             tts_response, info = self._make_request(SES_MODELLERI, metin, config, log_ekle)
-        except Exception:
-            log_ekle("❌ Hiçbir ses modeli başarılı olamadı.")
+        except Exception as e:
+            log_ekle(f"❌ Hiçbir ses modeli başarılı olamadı: {str(e)[:100]}")
             return False, None
 
         try:
             candidates = getattr(tts_response, "candidates", None)
+            
+            # 1. Prompt Feedback Kontrolü (Giriş metni bloklanmış mı?)
             if not candidates:
-                raise ValueError("TTS candidates bulunamadı")
-            content = getattr(candidates[0], "content", None)
-            parts = getattr(content, "parts", None) if content else None
+                pf = getattr(tts_response, "prompt_feedback", None)
+                if pf:
+                    block_reason = getattr(pf, "block_reason", "Bilinmiyor")
+                    raise ValueError(f"Giriş metni güvenlik filtresine takıldı (Block Reason: {block_reason})")
+                raise ValueError("TTS candidates bulunamadı (Boş response)")
+
+            candidate = candidates[0]
+            
+            # 2. Finish Reason Kontrolü (Çıkış bloklanmış mı?)
+            finish_reason = getattr(candidate, "finish_reason", None)
+            if finish_reason and str(finish_reason) not in ["STOP", "FinishReason.STOP", "1", "stop"]:
+                safety_ratings = getattr(candidate, "safety_ratings", [])
+                raise ValueError(f"Model üretimi durdurdu (Finish Reason: {finish_reason}). Safety: {safety_ratings}")
+
+            # 3. Content ve Parts Kontrolü
+            content = getattr(candidate, "content", None)
+            if not content:
+                raise ValueError(f"TTS content boş (Finish Reason: {finish_reason})")
+
+            parts = getattr(content, "parts", None)
             if not parts:
-                raise ValueError("TTS parts bulunamadı")
-            inline_data = getattr(parts[0], "inline_data", None)
-            audio_data = getattr(inline_data, "data", None) if inline_data else None
+                raise ValueError("TTS parts bulunamadı (Content var ama parts boş)")
+
+            # 4. Audio Data Çıkarma
+            audio_data = None
+            for part in parts:
+                inline_data = getattr(part, "inline_data", None)
+                if inline_data:
+                    data = getattr(inline_data, "data", None)
+                    if data:
+                        audio_data = data
+                        break
+            
             if not audio_data:
-                raise ValueError("TTS audio verisi boş")
+                raise ValueError("TTS audio verisi boş (parts içinde inline_data yok)")
+                
             if isinstance(audio_data, str):
                 audio_data = base64.b64decode(audio_data)
 
