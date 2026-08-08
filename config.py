@@ -60,8 +60,8 @@ SES_GENISLIK = 2
 
 # ===== VİDEO İŞLEME SABİTLERİ =====
 HEDEF_2K_Y = 1440
-VIDEO_CRF = 23
-VIDEO_PRESET = "fast"
+VIDEO_CRF = 28
+VIDEO_PRESET = "ultrafast"
 
 # ===== SES SEÇENEKLERİ =====
 SES_SECENEKLERI = [
