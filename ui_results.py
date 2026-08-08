@@ -1,5 +1,7 @@
 """Sonuç gösterim bileşeni: Video, ses, metinler, AI düşünme zinciri, yeniden ses+video üretme."""
 import os
+import re
+import json
 import base64
 
 import streamlit as st
@@ -9,7 +11,6 @@ from config import SES_HIZ_CARPANI
 from utils import markdown_temizle, kapak_basliklarini_formatla
 from storage import tum_kayitlari_sil
 from media import temp_dosya_temizle, video_ve_sesi_birlestir, gecici_ses_yolu, gecici_dosya_yolu
-
 
 def render_results(log_ekle, router) -> None:
     """Üretim sonuçlarını ekrana çiz."""
@@ -46,7 +47,6 @@ def render_results(log_ekle, router) -> None:
         with open(sonuc["final_video"], "rb") as f:
             vid_bytes = f.read()
 
-        # Önizleme varsayılan gizli
         show_generated = st.toggle("👁️ Üretilen Videoyu Göster", value=False, key="show_generated_video")
         if show_generated:
             st.video(vid_bytes)
@@ -115,29 +115,94 @@ async function shareVideo() {{
 
     st.divider()
 
-    st.markdown("### 📝 Metin İçerikleri")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.subheader("1️⃣ Reels Açıklaması")
-        st.caption("Katmanlı caption + 5 hashtag")
-        aciklama_metni = markdown_temizle(veri.get("reels_aciklamasi", ""))
-        hashtagler = veri.get("reels_hashtagleri", [])
-        if hashtagler and isinstance(hashtagler, list):
-            hashtag_str = " ".join([h if str(h).startswith("#") else f"#{h}" for h in hashtagler])
-            tam_aciklama = f"{aciklama_metni}\n\n{hashtag_str}"
-        else:
-            tam_aciklama = aciklama_metni
-        st.code(tam_aciklama, language=None)
+    # ============================================================
+    # YENİ METİN GÖSTERİMİ (TEK KUTU + KOPYALA BUTONU)
+    # ============================================================
+    st.markdown("### 📝 Metin İçerikleri (Toplu)")
+    
+    # 1. Verileri al
+    aciklama_metni = markdown_temizle(veri.get("reels_aciklamasi", ""))
+    hashtagler = veri.get("reels_hashtagleri", [])
+    if hashtagler and isinstance(hashtagler, list):
+        hashtag_str = " ".join([h if str(h).startswith("#") else f"#{h}" for h in hashtagler])
+        tam_aciklama = f"{aciklama_metni}\n\n{hashtag_str}"
+    else:
+        tam_aciklama = aciklama_metni
+        
+    basliklar = kapak_basliklarini_formatla(veri.get("kapak_basliklari"))
+    threads = markdown_temizle(veri.get("threads_aciklamasi", ""))
 
-    with col2:
-        st.subheader("2️⃣ Kapak Başlıkları")
-        st.caption("5 alternatif")
-        st.code(kapak_basliklarini_formatla(veri.get("kapak_basliklari")), language=None)
+    # 2. Garanti Formatlama (AI bazen 3-4 enter basarsa bunu tek enter'a düşürür)
+    def format_temizle(metin):
+        return re.sub(r'\n{3,}', '\n\n', str(metin).strip())
 
-    with col3:
-        st.subheader("3️⃣ Threads Açıklaması")
-        st.caption(f"Kısa, sohbet havasında, hashtagsiz (Model: {sonuc.get('kullanilan_threads_modeli', '?')})")
-        st.code(markdown_temizle(veri.get("threads_aciklamasi", "")), language=None)
+    tam_aciklama = format_temizle(tam_aciklama)
+    basliklar = format_temizle(basliklar)
+    threads = format_temizle(threads)
+
+    # 3. Ayraç ve birleştirme
+    ayrac = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    birlesik_metin = f"""📌 REELS AÇIKLAMASI
+{tam_aciklama}
+
+{ayrac}
+
+📌 KAPAK BAŞLIKLARI
+{basliklar}
+
+{ayrac}
+
+📌 THREADS AÇIKLAMASI
+{threads}
+"""
+
+    # 4. Kopyalama Butonu (JS ile tek tıkla kopyalama)
+    js_metin = json.dumps(birlesik_metin)
+
+    copy_html = f"""
+    <button onclick="copyAllText()" id="copyBtn" style="
+        width:100%;height:48px;font-size:16px;font-weight:600;
+        background:linear-gradient(135deg,#1E90FF,#00BFFF);
+        color:#fff;border:none;border-radius:8px;cursor:pointer;
+        margin-bottom:10px;
+    ">📋 Tüm Metinleri Kopyala (Reels + Başlıklar + Threads)</button>
+    <script>
+    async function copyAllText() {{
+        const text = {js_metin};
+        try {{
+            await navigator.clipboard.writeText(text);
+            const btn = document.getElementById("copyBtn");
+            const oldText = btn.innerText;
+            btn.innerText = "✅ Kopyalandı!";
+            btn.style.background = "#28a745";
+            setTimeout(() => {{
+                btn.innerText = oldText;
+                btn.style.background = "linear-gradient(135deg,#1E90FF,#00BFFF)";
+            }}, 2000);
+        }} catch (err) {{
+            const textArea = document.createElement("textarea");
+            textArea.value = text;
+            document.body.appendChild(textArea);
+            textArea.select();
+            document.execCommand("copy");
+            document.body.removeChild(textArea);
+        }}
+    }}
+    </script>
+    """
+    components.html(copy_html, height=60)
+    
+    # 5. Birleşik Kutu
+    st.text_area(
+        "Birleşik Metinler",
+        value=birlesik_metin,
+        height=450,
+        label_visibility="collapsed"
+    )
+    # ============================================================
+    # METİN GÖSTERİMİ SONU
+    # ============================================================
 
     st.divider()
 
