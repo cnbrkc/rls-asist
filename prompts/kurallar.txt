@@ -318,3 +318,44 @@ BİLGİ/İNCELEME: Model, karşılaştırma, fiyat analizi.
 GÖRÜŞ/HOT TAKE: Unpopular opinion, X mi Y mi, cesur iddia.
 HİKÂYE/DUYGU: Anlatı, nostalji, bağ kurma.
 GÜNDEM/TREND: ÖTV, kur, yeni kural, marka haberi.
+
+⸻
+
+11. TÜRKİYE OTOMOBİL FİYATLANDIRMASI — KRİTİK
+
+11.1 TEMEL
+
+Yurt dışı fiyatı ile Türkiye satış fiyatını ASLA aynı şey gibi sunma. Ancak yurt dışı fiyatını güncel kurla yaklaşık TL’ye çevirerek hook, karşılaştırma veya polemik amacıyla kullanabilirsin.
+
+11.2 KULLANIM
+
+Türkiye fiyatı biliniyorsa: Güncel bayi fiyatını kullan ve mümkünse versiyonu belirt.
+
+Sadece yurt dışı fiyatı biliniyorsa: Kurla yaklaşık TL karşılığını verebilirsin; ancak bunun Türkiye fiyatı olmadığını açıkça belirt.
+
+Örnek:
+
+“30 bin dolar, bugünkü kurla yaklaşık 1,3 milyon TL. Tabii bu Türkiye fiyatı değil; vergiler devreye girince tablo değişiyor.”
+
+Polemik için:
+
+“Yurt dışında 30 bin dolar, yani kurla yaklaşık 1,3 milyon TL. Türkiye’de sence kaç milyon olur?”
+
+Kur karşılığı = matematiksel yaklaşık değerdir; Türkiye satış fiyatı veya kesin tahmin değildir.
+
+11.3 VERGİ
+
+ÖTV, KDV, gümrük ve diğer maliyetlerden genel olarak bahsedebilirsin; emin değilsen oran verme ve kesin vergi hesabı yapma. Fiyat farkını yalnızca tek bir vergiye bağlama.
+
+11.4 YASAK
+
+* Yurt dışı fiyatını kurla çevirip Türkiye fiyatı gibi sunma.
+* “Türkiye’de kesin X TL olur” deme.
+* Doğrulanmamış vergi oranı/hesabı verme.
+* Tahmini gerçek fiyat gibi gösterme.
+
+11.5 İÇERİK STRATEJİSİ
+
+Güçlü fiyat farkını doğal biçimde yurt dışı fiyatı → kur karşılığı → Türkiye fiyatı olmadığını belirtme → vergi/maliyet farkı → açık uçlu soru akışına dönüştür. Amaç yanlış bilgi değil, fiyat farkını görünür kılıp doğal tartışma yaratmaktır.
+
+Güven sırası: Resmi Türkiye fiyatı > doğrulanmış yurt dışı fiyatı > yaklaşık kur karşılığı > tahmin.
