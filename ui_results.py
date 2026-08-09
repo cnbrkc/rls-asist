@@ -402,6 +402,15 @@ def render_results(log_ekle, router) -> None:
                         st.session_state.sonuc['secilen_ses_ingilizce'] = sonuc.get('secilen_ses_ingilizce', '')
                         st.session_state.sonuc['kullanilan_ses_modeli'] = kullanilan_ses_modeli_yeni or sonuc.get('kullanilan_ses_modeli', '?')
                         st.session_state.sonuc['veri']['seslendirme_metni'] = temiz_metin
+                        # Kullanıcı metni elle değiştirdiği için önceki QA artık
+                        # bu yeni metin için geçerli değildir.
+                        st.session_state.sonuc['qa_result'] = {
+                            'overall': 'ATLANDI',
+                            'regeneration_targets': [],
+                            'tts_check': 'ATLANDI: Metin kullanıcı tarafından değiştirildi.'
+                        }
+                        if isinstance(st.session_state.sonuc.get('pipeline_state'), dict):
+                            st.session_state.sonuc['pipeline_state']['qa_state_final'] = st.session_state.sonuc['qa_result']
                         if 'pipeline_state' in st.session_state.sonuc:
                             pipeline_state_local = st.session_state.sonuc['pipeline_state']
                             reels_state_local = pipeline_state_local.get('reels_state', {})

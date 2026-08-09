@@ -118,26 +118,33 @@ def _caption_calistir(router, reels_state, fact_state, editorial_state, log_ekle
     icerik = girdi_birlestir(
         durumu_metne_donustur("SEÇİLEN SESLENDİRME", reels_state.get("seslendirme_metni", "")),
         durumu_metne_donustur("SEÇİLEN HOOK/KAPAK", _secilen_hook_getir(reels_state)),
+        durumu_metne_donustur("VIDEO IDENTITY", video_state.get("video_identity", {})),
+        durumu_metne_donustur("FORENSIC TIMELINE", video_state.get("timeline", [])),
         durumu_metne_donustur("FACT LOCK", fact_state),
         durumu_metne_donustur("EDITORIAL BRIEF", editorial_state),
+        durumu_metne_donustur("SEÇİLEN HOOK/KAPAK", _secilen_hook_getir(reels_state)),
     )
     return router.metin_uret(icerik, system_prompt, CAPTION_SCHEMA, log_ekle, arama_kullan=False)
 
 
-def _threads_calistir(router, fact_state, editorial_state, log_ekle):
+def _threads_calistir(router, video_state, fact_state, editorial_state, log_ekle):
     system_prompt = threads_promptunu_olustur()
     icerik = girdi_birlestir(
+        durumu_metne_donustur("VIDEO IDENTITY", video_state.get("video_identity", {})),
         durumu_metne_donustur("FACT LOCK", fact_state),
         durumu_metne_donustur("EDITORIAL BRIEF", editorial_state),
     )
     return router.metin_uret(icerik, system_prompt, THREADS_SCHEMA, log_ekle, arama_kullan=False)
 
 
-def _qa_calistir(router, fact_state, editorial_state, reels_state, caption_state, threads_state, sure_saniye, log_ekle):
+def _qa_calistir(router, video_state, fact_state, editorial_state, reels_state, caption_state, threads_state, sure_saniye, log_ekle):
     system_prompt = qa_promptunu_olustur()
     icerik = girdi_birlestir(
+        durumu_metne_donustur("VIDEO IDENTITY", video_state.get("video_identity", {})),
+        durumu_metne_donustur("FORENSIC TIMELINE", video_state.get("timeline", [])),
         durumu_metne_donustur("FACT LOCK", fact_state),
         durumu_metne_donustur("EDITORIAL BRIEF", editorial_state),
+        durumu_metne_donustur("SEÇİLEN HOOK/KAPAK", _secilen_hook_getir(reels_state)),
         durumu_metne_donustur("SESLENDİRME METNİ", reels_state.get("seslendirme_metni", "")),
         durumu_metne_donustur("KAPAK BAŞLIKLARI", reels_state.get("kapak_basliklari", [])),
         durumu_metne_donustur("REELS AÇIKLAMASI", caption_state.get("reels_aciklamasi", "")),
@@ -218,7 +225,7 @@ def pipeline_calistir(
     _ilerleme(ilerlemeyi_guncelle, 6)
     log_ekle("🧵 Threads hazırlanıyor...")
     try:
-        threads_state, model_threads = _threads_calistir(router, fact_state, editorial_state, log_ekle)
+        threads_state, model_threads = _threads_calistir(router, video_state, fact_state, editorial_state, log_ekle)
     except Exception as threads_hata:
         log_ekle(f"⚠️ Threads üretilemedi, 'üretilemedi' olarak işaretleniyor: {str(threads_hata)[:150]}")
         threads_state, model_threads = {"threads_aciklamasi": ""}, "hata"
@@ -227,7 +234,7 @@ def pipeline_calistir(
     # ---- 7) FINAL QA (+ gerekirse SADECE ilgili aşamanın kısmi yeniden üretimi) ----
     _ilerleme(ilerlemeyi_guncelle, 7)
     log_ekle("🔍 Son kalite kontrol (QA)...")
-    qa_state, _ = _qa_calistir(router, fact_state, editorial_state, reels_state, caption_state, threads_state, sure_saniye, log_ekle)
+    qa_state, _ = _qa_calistir(router, video_state, fact_state, editorial_state, reels_state, caption_state, threads_state, sure_saniye, log_ekle)
     pipeline_state["qa_state_ilk"] = qa_state
 
     hedefler = set(qa_state.get("regeneration_targets", []) or [])
@@ -250,7 +257,7 @@ def pipeline_calistir(
                 pipeline_state["reels_state"] = reels_state
                 caption_state, model_caption = _caption_calistir(router, reels_state, fact_state, editorial_state, log_ekle)
                 pipeline_state["caption_state"] = caption_state
-                threads_state, model_threads = _threads_calistir(router, fact_state, editorial_state, log_ekle)
+                threads_state, model_threads = _threads_calistir(router, video_state, fact_state, editorial_state, log_ekle)
                 pipeline_state["threads_state"] = threads_state
             except Exception as fact_fail_hata:
                 log_ekle(f"⚠️ FACT_FAIL sonrası yeniden üretim başarısız: {str(fact_fail_hata)[:150]}")
@@ -264,6 +271,15 @@ def pipeline_calistir(
                         sure_saniye, icerik_tonu, log_ekle,
                     )
                     pipeline_state["reels_state"] = reels_state
+                    # Caption, seçilen hook ve voiceover'a bağlıdır; Reels değiştiyse senkronize et.
+                    try:
+                        caption_state, model_caption = _caption_calistir(
+                            router, reels_state, fact_state, editorial_state, log_ekle
+                        )
+                        pipeline_state["caption_state"] = caption_state
+                        log_ekle("🔁 Reels değişti → Caption + hashtag senkronize edildi.")
+                    except Exception as caption_hata:
+                        log_ekle(f"⚠️ Reels sonrası caption yenilenemedi: {str(caption_hata)[:150]}")
                 except Exception as reels_hata:
                     log_ekle(f"⚠️ Reels Creative yeniden üretimi başarısız: {str(reels_hata)[:150]}")
 
@@ -278,13 +294,13 @@ def pipeline_calistir(
             if "THREADS_FAIL" in hedefler:
                 log_ekle("🔁 Threads yeniden üretiliyor.")
                 try:
-                    threads_state, model_threads = _threads_calistir(router, fact_state, editorial_state, log_ekle)
+                    threads_state, model_threads = _threads_calistir(router, video_state, fact_state, editorial_state, log_ekle)
                     pipeline_state["threads_state"] = threads_state
                 except Exception as threads_hata:
                     log_ekle(f"⚠️ Threads yeniden üretimi başarısız: {str(threads_hata)[:150]}")
 
         # Maliyeti kontrol altında tutmak için TEK bir doğrulama turu daha yapılır (sınırsız döngü yok).
-        qa_state, _ = _qa_calistir(router, fact_state, editorial_state, reels_state, caption_state, threads_state, sure_saniye, log_ekle)
+        qa_state, _ = _qa_calistir(router, video_state, fact_state, editorial_state, reels_state, caption_state, threads_state, sure_saniye, log_ekle)
         kalan_hedefler = set(qa_state.get("regeneration_targets", []) or [])
         if kalan_hedefler:
             log_ekle(f"⚠️ Yeniden üretimden sonra hâlâ QA uyarısı var: {', '.join(kalan_hedefler)} (içerik yine de kullanılabilir, gözden geçirmen önerilir).")
@@ -296,6 +312,7 @@ def pipeline_calistir(
     pipeline_state["qa_state_final"] = qa_state
 
     # ---- 8) TTS ----
+    tts_sonrasi_qa_gerekli = False
     _ilerleme(ilerlemeyi_guncelle, 8)
     log_ekle("🎧 Ses üretiliyor...")
     seslendirme_metni = reels_state.get("seslendirme_metni", "")
@@ -318,19 +335,37 @@ def pipeline_calistir(
             log_ekle("⚠️ Ses çok kısa kaldı. Reels Creative kelime hedefi artırılıp SADECE voiceover yeniden üretiliyor...")
             fallback_kelime_orani = KELIME_HIZI_ORANI * 1.35
             try:
-                reels_state = _reels_creative_calistir(
+                eski_reels_state = reels_state
+                yeni_reels_state = _reels_creative_calistir(
                     router, editorial_state, fact_state, video_state, metin_uretim_notlari,
                     sure_saniye, icerik_tonu, log_ekle, kelime_hizi_orani=fallback_kelime_orani,
                 )[0]
-                pipeline_state["reels_state"] = reels_state
-                seslendirme_metni = reels_state.get("seslendirme_metni", seslendirme_metni)
+                yeni_seslendirme_metni = yeni_reels_state.get(
+                    "seslendirme_metni", seslendirme_metni
+                )
 
                 eski_ses = ses_dosyasi
                 ses_dosyasi = gecici_ses_yolu()
                 fallback_basarili, fallback_modeli = router.ses_uret(
-                    seslendirme_metni, secilen_ses_ingilizce, ses_dosyasi, log_ekle, hiz_carpani=SES_HIZ_CARPANI
+                    yeni_seslendirme_metni, secilen_ses_ingilizce, ses_dosyasi,
+                    log_ekle, hiz_carpani=SES_HIZ_CARPANI
                 )
+
                 if fallback_basarili and os.path.exists(ses_dosyasi):
+                    tts_sonrasi_qa_gerekli = True
+                    reels_state = yeni_reels_state
+                    pipeline_state["reels_state"] = reels_state
+                    seslendirme_metni = yeni_seslendirme_metni
+
+                    # Voiceover/hook değiştiği için caption da yeni Reels'e bağlanmalı.
+                    try:
+                        caption_state, model_caption = _caption_calistir(
+                            router, reels_state, fact_state, editorial_state, log_ekle
+                        )
+                        pipeline_state["caption_state"] = caption_state
+                    except Exception as caption_hata:
+                        log_ekle(f"⚠️ Fallback sonrası caption yenilenemedi: {str(caption_hata)[:150]}")
+
                     ses_basarili = True
                     kullanilan_ses_modeli = fallback_modeli
                     if eski_ses != ses_dosyasi and os.path.exists(eski_ses):
@@ -338,27 +373,55 @@ def pipeline_calistir(
                     yeni_ses_sure = _ses_suresini_al(ses_dosyasi)
                     log_ekle(f"✅ Fallback sonrası yeni ses süresi: {yeni_ses_sure:.2f}s")
                 else:
-                    # Fallback başarısızsa ilk başarılı ses korunur.
                     if os.path.exists(ses_dosyasi):
                         temp_dosya_temizle(ses_dosyasi)
+
+                    # Yeni metin için TTS başarısızsa eski metin + eski ses birlikte korunur.
+                    reels_state = eski_reels_state
+                    pipeline_state["reels_state"] = reels_state
+                    seslendirme_metni = reels_state.get(
+                        "seslendirme_metni", seslendirme_metni
+                    )
                     if ilk_ses_dosyasi and os.path.exists(ilk_ses_dosyasi):
                         ses_dosyasi = ilk_ses_dosyasi
                         ses_basarili = True
                         kullanilan_ses_modeli = ilk_ses_modeli
                     else:
                         ses_basarili = False
-                    log_ekle("⚠️ Fallback ses üretimi başarısız. İlk başarılı ses korunuyor.")
+                    log_ekle("⚠️ Fallback ses üretimi başarısız. İlk başarılı ses ve metin korunuyor.")
             except Exception as fallback_hata:
                 if os.path.exists(ses_dosyasi) and ses_dosyasi != ilk_ses_dosyasi:
                     temp_dosya_temizle(ses_dosyasi)
+
+                reels_state = eski_reels_state
+                pipeline_state["reels_state"] = reels_state
+                seslendirme_metni = reels_state.get(
+                    "seslendirme_metni", seslendirme_metni
+                )
                 if ilk_ses_dosyasi and os.path.exists(ilk_ses_dosyasi):
                     ses_dosyasi = ilk_ses_dosyasi
                     ses_basarili = True
                     kullanilan_ses_modeli = ilk_ses_modeli
-                log_ekle(f"⚠️ Fallback voiceover üretimi hatası; ilk ses korunuyor: {str(fallback_hata)[:180]}")
+                log_ekle(
+                    f"⚠️ Fallback voiceover üretimi hatası; "
+                    f"ilk ses ve metin korunuyor: {str(fallback_hata)[:180]}"
+                )
 
     if ses_basarili and os.path.exists(ses_dosyasi):
         pipeline_state["ses_dosyasi_son"] = ses_dosyasi
+
+    # Sadece TTS fallback gerçekten yeni bir voiceover ürettiyse
+    # önceki QA'yı geçersiz sayıp bir son doğrulama yap.
+    if tts_sonrasi_qa_gerekli:
+        qa_state, _ = _qa_calistir(
+            router, video_state, fact_state, editorial_state,
+            reels_state, caption_state, threads_state, sure_saniye, log_ekle
+        )
+        pipeline_state["qa_state_final"] = qa_state
+        if str(qa_state.get("overall", "")).upper() == "PASS":
+            log_ekle("✅ TTS fallback sonrası final QA: PASS.")
+        elif qa_state.get("overall"):
+            log_ekle(f"⚠️ TTS fallback sonrası final QA: {qa_state.get('overall')}.")
 
     # ---- 9) VIDEO + AUDIO RENDER ----
     _ilerleme(ilerlemeyi_guncelle, 9)

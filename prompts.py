@@ -72,8 +72,9 @@ def _kelime_hedefleri(sure_saniye: int, kelime_hizi_orani: float = None):
     if kelime_hizi_orani is None:
         kelime_hizi_orani = KELIME_HIZI_ORANI
     hedef_kelime = round(sure_saniye * kelime_hizi_orani / KELIME_YUVARLAMA) * KELIME_YUVARLAMA
-    min_kelime = max(5, int(hedef_kelime * 0.85))
-    max_kelime = int(hedef_kelime * 1.15)
+    tolerans = max(5, int(hedef_kelime * 0.10))
+    min_kelime = max(5, hedef_kelime - tolerans)
+    max_kelime = hedef_kelime + tolerans
     return hedef_kelime, min_kelime, max_kelime, kelime_hizi_orani
 
 
