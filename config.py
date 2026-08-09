@@ -11,9 +11,22 @@ except Exception as e:
     st.stop()
 
 # ===== MODEL LİSTELERİ =====
-VIDEO_ANALIZ_MODELLERI = ["gemini-3.6-flash", "gemini-2.5-flash"]
-METIN_MODELLERI = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
-SES_MODELLERI = ["gemini-2.5-flash-preview-tts"]
+# Üretimde doğrulanmış güncel model sırası.
+# 3.6 Flash: ana akıl yürütme / multimodal omurga.
+# 3.5 Flash-Lite: hızlı ve ucuz üretim/fallback; 2026-07 itibarıyla GA.
+# 2.5 Flash: güvenilir geriye dönük fallback.
+# 3.1 Flash-Lite: son çare; eski akışları desteklemek için tutulur.
+VIDEO_ANALIZ_MODELLERI = ["gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"]
+METIN_MODELLERI = ["gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash", "gemini-3.1-flash-lite"]
+
+# Research için Search Grounding sırası ayrı tutulur. 2.5 Search kotası
+# Gemini 3 grounding kotasından ayrıdır; bu yüzden mevcut Gemini 3
+# grounding kotası sorunlarında 2.5'i önce denemek daha rasyoneldir.
+ARAMA_MODELLERI = ["gemini-2.5-flash", "gemini-3.5-flash-lite", "gemini-3.6-flash"]
+
+# Daha doğal performans ve daha iyi stil kontrolü için 3.1 TTS öncelikli.
+# 2.5 Flash TTS güvenilir fallback olarak korunur.
+SES_MODELLERI = ["gemini-3.1-flash-tts-preview", "gemini-2.5-flash-preview-tts"]
 
 # ===== COOLDOWN SÜRELERİ =====
 COOLDOWN_SUNUCU = 15 * 60

@@ -9,7 +9,7 @@ from google import genai
 from google.genai import types
 
 from config import (
-    API_KEYS, METIN_MODELLERI, SES_MODELLERI, VIDEO_ANALIZ_MODELLERI,
+    API_KEYS, METIN_MODELLERI, ARAMA_MODELLERI, SES_MODELLERI, VIDEO_ANALIZ_MODELLERI,
     COOLDOWN_SUNUCU, COOLDOWN_BULUNAMADI, COOLDOWN_DIGER,
     COOLDOWN_FREE_TIER_YOK, IP_BAN_KORUMA, QUOTA_RETRY_DEFAULT,
     model_arama_destekliyor_mu
@@ -84,73 +84,154 @@ class SmartRouter:
         return 0
 
     def _parse_hata(self, hata_metni: str) -> Tuple[str, int]:
-        if "limit: 0" in hata_metni or "limit\": 0" in hata_metni:
-            return "free_tier_yok", COOLDOWN_FREE_TIER_YOK
-        if "429" in hata_metni or "resource_exhausted" in hata_metni or "quota" in hata_metni:
-            return "quota", 0
-        if "503" in hata_metni or "unavailable" in hata_metni:
-            return "combo", COOLDOWN_SUNUCU
-        if "404" in hata_metni or "not_found" in hata_metni:
+        metin = (hata_metni or "").lower()
+
+        if (
+            "404" in metin
+            or "not_found" in metin
+            or "model not found" in metin
+            or "is not found for api version" in metin
+        ):
             return "model", COOLDOWN_BULUNAMADI
+
+        if "limit: 0" in metin or 'limit": 0' in metin:
+            return "free_tier_yok", COOLDOWN_FREE_TIER_YOK
+
+        if (
+            "429" in metin
+            or "resource_exhausted" in metin
+            or "quota" in metin
+            or "rate limit" in metin
+        ):
+            return "quota", 0
+
+        if (
+            "400" in metin
+            or "invalid_argument" in metin
+            or "bad request" in metin
+            or "unsupported" in metin
+        ):
+            return "model_config", COOLDOWN_BULUNAMADI
+
+        if "503" in metin or "unavailable" in metin:
+            return "combo", COOLDOWN_SUNUCU
+
         return "combo", COOLDOWN_DIGER
 
     def _handle_hata(self, mail: str, model: str, hata_metni: str, log_ekle) -> str:
         scope, cooldown = self._parse_hata(hata_metni)
+
         if scope == "free_tier_yok":
-            log_ekle(f" 🚫 {model} free tier'da YOK (limit: 0) → 7 gün banlandı")
+            log_ekle(
+                f" 🚫 {model} free tier'da YOK (limit: 0) → "
+                f"model geçici olarak devre dışı."
+            )
             self._ban(mail, model, cooldown, "model")
             time.sleep(IP_BAN_KORUMA)
             return "break_model"
+
         if scope == "quota":
             self._last_request_had_quota = True
             delay = self._retry_delay_cikar(hata_metni)
-            ban_sure = delay if delay > 0 else QUOTA_RETRY_DEFAULT
-            self._ban(mail, model, ban_sure, "combo")
-            log_ekle(f" ⏳ {mail} kota aştı → {ban_sure}sn banlandı, diğer key deneniyor")
-            time.sleep(IP_BAN_KORUMA)
-            return "devam"
 
-        ban_sure = f"{cooldown // 60} dk" if cooldown < 3600 else f"{cooldown // 3600} saat"
-        if scope == "model":
-            log_ekle(f" ❌ {model} MODEL bazlı hata → TÜM key'ler için {ban_sure} banlandı")
+            # retryDelay varsa bu gerçek kısa süreli rate-limit olabilir.
+            # Yoksa "current quota / exceeded quota" gibi plan kotasıdır.
+            if delay > 0:
+                ban_sure = delay
+                log_ekle(
+                    f" ⏳ {mail} + {model}: kısa süreli rate-limit → "
+                    f"{ban_sure}sn cooldown."
+                )
+            else:
+                ban_sure = QUOTA_RETRY_DEFAULT
+                log_ekle(
+                    f" ⛔ {mail} + {model}: model/proje kotası aşıldı → "
+                    f"{ban_sure}sn cooldown. Aynı kota için diğer key'ler "
+                    f"gereksiz yere denenmeyecek."
+                )
+
+            # Quota'yı key yerine MODEL kapsamında işaretlemek,
+            # aynı projedeki 3 key'i art arda vurup logu şişirmeyi önler.
+            self._ban(mail, model, ban_sure, "model")
+            time.sleep(IP_BAN_KORUMA)
+            return "quota"
+
+        if scope == "model_config":
+            log_ekle(
+                f" ❌ {mail} + {model}: istek/model-konfigürasyonu uyumsuz "
+                f"→ model devre dışı bırakılıyor. Hata: {hata_metni[:220]}"
+            )
             self._ban(mail, model, cooldown, "model")
             time.sleep(IP_BAN_KORUMA)
             return "break_model"
-        else:
-            log_ekle(f" ⚠️ {mail} hatası → {model} ile {ban_sure} banlandı, diğer key deneniyor")
-            self._ban(mail, model, cooldown, scope)
-            time.sleep(IP_BAN_KORUMA)
-            return "devam"
 
-    def _make_request(self, model_listesi: List[str], contents: Any, config: types.GenerateContentConfig, log_ekle) -> Tuple[Any, str]:
+        ban_sure = f"{cooldown // 60} dk" if cooldown < 3600 else f"{cooldown // 3600} saat"
+        if scope == "model":
+            log_ekle(
+                f" ❌ {model} MODEL bazlı hata → tüm key'ler için {ban_sure} devre dışı."
+            )
+            self._ban(mail, model, cooldown, "model")
+            time.sleep(IP_BAN_KORUMA)
+            return "break_model"
+
+        log_ekle(
+            f" ⚠️ {mail} + {model} geçici hata → {ban_sure} cooldown. "
+            f"Detay: {hata_metni[:180]}"
+        )
+        self._ban(mail, model, cooldown, scope)
+        time.sleep(IP_BAN_KORUMA)
+        return "devam"
+
+    def _make_request(
+        self,
+        model_listesi: List[str],
+        contents: Any,
+        config: types.GenerateContentConfig,
+        log_ekle,
+        stop_on_quota: bool = False,
+    ) -> Tuple[Any, str]:
         son_hata = None
         self._last_request_had_quota = False
+
         for model_adi in model_listesi:
             log_ekle(f"🧠 Model deneniyor: {model_adi}")
             model_denendi = False
+
             for mail, api_key in API_KEYS.items():
                 if self._is_banned(mail, model_adi):
-                    log_ekle(f" ⏸️ {mail} + {model_adi} banlı, atlanıyor")
+                    log_ekle(f" ⏸️ {mail} + {model_adi} cooldown'da, atlanıyor")
                     continue
+
                 model_denendi = True
                 log_ekle(f" 🚀 {mail} ile {model_adi} deneniyor...")
+
                 try:
                     client = genai.Client(api_key=api_key)
                     response = client.models.generate_content(
                         model=model_adi,
                         contents=contents,
-                        config=config
+                        config=config,
                     )
                     log_ekle(f" ✅ Başarılı → {mail} + {model_adi}")
                     time.sleep(IP_BAN_KORUMA)
                     return response, f"{mail}+{model_adi}"
+
                 except Exception as e:
                     son_hata = e
                     aksiyon = self._handle_hata(mail, model_adi, str(e), log_ekle)
-                    if aksiyon == "break_model":
+
+                    # Search Grounding quota'sı aynı anda onlarca key/model
+                    # kombinasyonunu denemeye değmez. metin_uret() hemen
+                    # Search'süz Fact Lock fallback'ine geçsin.
+                    if stop_on_quota and aksiyon == "quota":
+                        raise
+
+                    if aksiyon in ("break_model", "quota"):
                         break
+
             if not model_denendi:
-                log_ekle(f" ⏸️ {model_adi} tüm key'ler için banlı, atlanıyor")
+                log_ekle(f" ⏸️ {model_adi} tüm key'ler için cooldown'da, atlanıyor")
+
         raise son_hata if son_hata else Exception("Tüm model+key kombinasyonları başarısız.")
 
     def metin_uret(self, icerik: Any, system_prompt: str, response_schema: dict, log_ekle, model_listesi=None, arama_kullan: bool = True) -> Tuple[dict, str]:
@@ -162,19 +243,19 @@ class SmartRouter:
         icerik: string ya da (video_part gerekmeyen) parça listesi olabilir.
         """
         if model_listesi is None:
-            model_listesi = METIN_MODELLERI
+            model_listesi = ARAMA_MODELLERI if arama_kullan else METIN_MODELLERI
         config_parametreleri = dict(
             system_instruction=system_prompt,
             response_mime_type="application/json",
             response_schema=response_schema,
         )
-        if arama_kullan and model_arama_destekliyor_mu(model_listesi[0]):
+        if arama_kullan and model_listesi and model_arama_destekliyor_mu(model_listesi[0]):
             config_parametreleri["tools"] = [types.Tool(google_search=types.GoogleSearch())]
             log_ekle(f" 🔎 {model_listesi[0]} için güncel bilgi araması aktif")
         config = types.GenerateContentConfig(**config_parametreleri)
 
         try:
-            response, info = self._make_request(model_listesi, icerik, config, log_ekle)
+            response, info = self._make_request(model_listesi, icerik, config, log_ekle, stop_on_quota=arama_kullan)
         except Exception:
             # Google Search grounding quota/rate-limit yüzünden başarısız olduysa
             # bütün model+key kombinasyonlarını 30 dk kilitleyip pipeline'ı
@@ -200,6 +281,7 @@ class SmartRouter:
                     icerik,
                     fallback_config,
                     log_ekle,
+                    stop_on_quota=False,
                 )
                 log_ekle(
                     " ⚠️ Fact Lock Search'süz fallback ile tamamlandı. "
@@ -210,23 +292,162 @@ class SmartRouter:
 
         return guvenli_json_yukle(getattr(response, "text", "")), info
 
-    def ses_uret(self, metin: str, ses_adi: str, cikti_dosyasi: str, log_ekle, hiz_carpani: float = 1.0) -> Tuple[bool, Optional[str]]:
-        # 🔥 GÜVENLİK FİLTRELERİNİ KAPAT (TTS metinleri yanlışlıkla bloklanmasın diye)
+    def _tts_performans_promptu_olustur(self, metin: str, ses_adi: str) -> str:
+        """Gemini TTS için insanî konuşma performansı yönlendirmesi.
+
+        Google'ın güncel TTS rehberindeki Audio Profile + Scene + Director's
+        Notes + açık Transcript sınırı yaklaşımını kullanır. Türkçe metinde
+        audio tag'leri İngilizce bırakılır; Google bunu özellikle öneriyor.
+        """
+        ses_profilleri = {
+            "Autonoe": "bright, confident, friendly, youthful-adult female presenter",
+            "Puck": "upbeat, charismatic, energetic male presenter",
+            "Aoede": "breezy, warm, relaxed female presenter",
+            "Callirrhoe": "easy-going, natural, conversational female presenter",
+            "Kore": "firm, clear, confident female presenter",
+            "Leda": "youthful, lively, friendly female presenter",
+            "Zephyr": "bright, clean, energetic female presenter",
+            "Charon": "informative, calm, authoritative male presenter",
+            "Orus": "firm, strong, confident male presenter",
+            "Iapetus": "clear, fluid, conversational male presenter",
+            "Umbriel": "easy-going, relaxed, natural male presenter",
+            "Achird": "friendly, casual, conversational presenter",
+            "Zubenelgenubi": "casual, approachable, natural presenter",
+            "Sadaltager": "knowledgeable, calm, credible presenter",
+            "Sulafat": "warm, reassuring, human presenter",
+        }
+        profil = ses_profilleri.get(ses_adi, "natural, friendly, conversational automotive presenter")
+
+        satirlar = [s.strip() for s in (metin or "").splitlines() if s.strip()]
+        if not satirlar:
+            satirlar = [metin.strip()]
+
+        # Aşırı tag kullanmıyoruz; birkaç stratejik tag doğal prosodiyi destekler.
+        # Kullanıcının metninde zaten tag varsa onları koru.
+        if satirlar and not satirlar[0].startswith("["):
+            satirlar[0] = "[curious] " + satirlar[0]
+
+        for i, satir in enumerate(satirlar):
+            if i == 0:
+                continue
+            if "!" in satir and not satir.startswith("["):
+                satirlar[i] = "[excitedly] " + satir
+            elif "?" in satir and not satir.startswith("["):
+                satirlar[i] = "[curious] " + satir
+
+        transcript = "\n".join(satirlar)
+
+        return f"""SYNTHESIZE SPEECH ONLY. Do not read these instructions aloud.
+This is a Turkish automotive Instagram Reels voiceover performed by one human presenter.
+
+# AUDIO PROFILE
+The presenter is {profil}.
+They sound like a real Turkish automotive content creator speaking naturally to the camera, not a commercial announcer and not a robotic narrator.
+
+# SCENE
+A close, energetic social-media recording. The presenter is genuinely interested in the car and is talking directly to one person who likes cars.
+The performance should feel spontaneous, confident and human.
+
+# DIRECTOR'S NOTES
+- Language: Turkish. Pronounce Turkish naturally and clearly.
+- Use a conversational cadence with small, believable pauses.
+- Vary sentence rhythm and emphasis; do not make every sentence sound equally energetic.
+- Start with curiosity and pull the listener into the first sentence.
+- Let important facts land with subtle emphasis instead of shouting.
+- Keep energy medium-high but controlled; no radio-announcer voice.
+- Sound engaged and slightly smiling when appropriate.
+- Use natural breath/pause timing between meaning units.
+- Technical car names and numbers must be articulated clearly.
+- Do not add words, explanations, greetings, or commentary that are not in the transcript.
+- Do not read section labels, brackets, or these instructions aloud.
+- The transcript below is the ONLY text that should be spoken.
+- English audio tags in the transcript are performance directions, not spoken words.
+
+# TRANSCRIPT START
+{transcript}
+# TRANSCRIPT END
+"""
+
+    def _tts_response_audio_bytes(self, tts_response):
+        """Gemini TTS response'undan ham PCM verisini çıkar."""
+        candidates = getattr(tts_response, "candidates", None)
+        if not candidates:
+            pf = getattr(tts_response, "prompt_feedback", None)
+            if pf:
+                raise ValueError(
+                    f"Giriş metni güvenlik filtresine takıldı "
+                    f"(Block Reason: {getattr(pf, 'block_reason', 'Bilinmiyor')})"
+                )
+            raise ValueError("TTS candidates bulunamadı (boş response)")
+
+        candidate = candidates[0]
+        finish_reason = getattr(candidate, "finish_reason", None)
+        if finish_reason and str(finish_reason) not in [
+            "STOP", "FinishReason.STOP", "1", "stop"
+        ]:
+            safety_ratings = getattr(candidate, "safety_ratings", [])
+            raise ValueError(
+                f"Model üretimi durdurdu (Finish Reason: {finish_reason}). "
+                f"Safety: {safety_ratings}"
+            )
+
+        content = getattr(candidate, "content", None)
+        if not content:
+            raise ValueError(f"TTS content boş (Finish Reason: {finish_reason})")
+
+        parts = getattr(content, "parts", None)
+        if not parts:
+            raise ValueError("TTS parts bulunamadı")
+
+        for part in parts:
+            inline_data = getattr(part, "inline_data", None)
+            if inline_data:
+                data = getattr(inline_data, "data", None)
+                if data:
+                    if isinstance(data, str):
+                        return base64.b64decode(data)
+                    return data
+
+        raise ValueError("TTS audio verisi boş (inline_data bulunamadı)")
+
+    def ses_uret(
+        self,
+        metin: str,
+        ses_adi: str,
+        cikti_dosyasi: str,
+        log_ekle,
+        hiz_carpani: float = 1.0,
+    ) -> Tuple[bool, Optional[str]]:
+        # TTS için güvenlik ayarları; mevcut davranış korunur.
         try:
             safety_settings = [
-                types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HARASSMENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
-                types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold=types.HarmBlockThreshold.BLOCK_NONE),
-                types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
-                types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
+                types.SafetySetting(
+                    category=types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                    threshold=types.HarmBlockThreshold.BLOCK_NONE,
+                ),
+                types.SafetySetting(
+                    category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                    threshold=types.HarmBlockThreshold.BLOCK_NONE,
+                ),
+                types.SafetySetting(
+                    category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                    threshold=types.HarmBlockThreshold.BLOCK_NONE,
+                ),
+                types.SafetySetting(
+                    category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                    threshold=types.HarmBlockThreshold.BLOCK_NONE,
+                ),
             ]
         except Exception:
-            safety_settings = None # Eski SDK versiyonları için fallback
+            safety_settings = None
 
         config_kwargs = dict(
             response_modalities=["AUDIO"],
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
-                    prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=ses_adi)
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                        voice_name=ses_adi
+                    )
                 )
             ),
         )
@@ -234,57 +455,56 @@ class SmartRouter:
             config_kwargs["safety_settings"] = safety_settings
 
         config = types.GenerateContentConfig(**config_kwargs)
-        
+        tts_girdisi = self._tts_performans_promptu_olustur(metin, ses_adi)
+
         try:
-            tts_response, info = self._make_request(SES_MODELLERI, metin, config, log_ekle)
+            tts_response, info = self._make_request(
+                SES_MODELLERI,
+                tts_girdisi,
+                config,
+                log_ekle,
+                stop_on_quota=False,
+            )
         except Exception as e:
-            log_ekle(f"❌ Hiçbir ses modeli başarılı olamadı: {str(e)[:100]}")
+            log_ekle(f"❌ Hiçbir ses modeli başarılı olamadı: {str(e)[:180]}")
             return False, None
 
+        # 3.1 Flash TTS çok nadiren audio yerine text token döndürebiliyor.
+        # Böyle bir durumda 2.5 TTS'ye tek seferlik kontrollü fallback yap.
         try:
-            candidates = getattr(tts_response, "candidates", None)
-            
-            # 1. Prompt Feedback Kontrolü (Giriş metni bloklanmış mı?)
-            if not candidates:
-                pf = getattr(tts_response, "prompt_feedback", None)
-                if pf:
-                    block_reason = getattr(pf, "block_reason", "Bilinmiyor")
-                    raise ValueError(f"Giriş metni güvenlik filtresine takıldı (Block Reason: {block_reason})")
-                raise ValueError("TTS candidates bulunamadı (Boş response)")
+            audio_data = self._tts_response_audio_bytes(tts_response)
+        except Exception as ilk_tts_hata:
+            log_ekle(
+                f"⚠️ TTS ilk modelinden geçerli audio alınamadı: "
+                f"{str(ilk_tts_hata)[:180]}"
+            )
 
-            candidate = candidates[0]
-            
-            # 2. Finish Reason Kontrolü (Çıkış bloklanmış mı?)
-            finish_reason = getattr(candidate, "finish_reason", None)
-            if finish_reason and str(finish_reason) not in ["STOP", "FinishReason.STOP", "1", "stop"]:
-                safety_ratings = getattr(candidate, "safety_ratings", [])
-                raise ValueError(f"Model üretimi durdurdu (Finish Reason: {finish_reason}). Safety: {safety_ratings}")
+            if len(SES_MODELLERI) < 2:
+                return False, None
 
-            # 3. Content ve Parts Kontrolü
-            content = getattr(candidate, "content", None)
-            if not content:
-                raise ValueError(f"TTS content boş (Finish Reason: {finish_reason})")
+            try:
+                fallback_model = SES_MODELLERI[1]
+                log_ekle(
+                    f"🔁 TTS fallback: {fallback_model} ile aynı performans "
+                    f"promptu bir kez yeniden üretiliyor..."
+                )
+                fallback_response, fallback_info = self._make_request(
+                    [fallback_model],
+                    tts_girdisi,
+                    config,
+                    log_ekle,
+                    stop_on_quota=False,
+                )
+                audio_data = self._tts_response_audio_bytes(fallback_response)
+                info = fallback_info
+            except Exception as ikinci_tts_hata:
+                log_ekle(
+                    f"❌ TTS fallback da başarısız: "
+                    f"{str(ikinci_tts_hata)[:180]}"
+                )
+                return False, None
 
-            parts = getattr(content, "parts", None)
-            if not parts:
-                raise ValueError("TTS parts bulunamadı (Content var ama parts boş)")
-
-            # 4. Audio Data Çıkarma
-            audio_data = None
-            for part in parts:
-                inline_data = getattr(part, "inline_data", None)
-                if inline_data:
-                    data = getattr(inline_data, "data", None)
-                    if data:
-                        audio_data = data
-                        break
-            
-            if not audio_data:
-                raise ValueError("TTS audio verisi boş (parts içinde inline_data yok)")
-                
-            if isinstance(audio_data, str):
-                audio_data = base64.b64decode(audio_data)
-
+        try:
             if abs(hiz_carpani - 1.0) < 0.001:
                 wav_yaz(cikti_dosyasi, audio_data)
                 return True, info
@@ -292,8 +512,13 @@ class SmartRouter:
             gecici_ham_dosya = gecici_dosya_yolu("ses_ham", "wav")
             try:
                 wav_yaz(gecici_ham_dosya, audio_data)
-                log_ekle(f"🎚️ Ses {hiz_carpani}x hızlandırılıyor (ffmpeg atempo, pitch korunur)...")
-                basarili = sesi_hizlandir(gecici_ham_dosya, cikti_dosyasi, hiz_carpani, log_ekle)
+                log_ekle(
+                    f"🎚️ Ses {hiz_carpani}x hızlandırılıyor "
+                    f"(ffmpeg atempo, pitch korunur)..."
+                )
+                basarili = sesi_hizlandir(
+                    gecici_ham_dosya, cikti_dosyasi, hiz_carpani, log_ekle
+                )
                 if not basarili:
                     log_ekle("⚠️ Hızlandırma başarısız, ham ses kullanılıyor.")
                     shutil.copy2(gecici_ham_dosya, cikti_dosyasi)
@@ -338,7 +563,7 @@ class SmartRouter:
             response_mime_type="application/json",
             response_schema=response_schema,
         )
-        if arama_kullan and model_arama_destekliyor_mu(model_listesi[0]):
+        if arama_kullan and model_listesi and model_arama_destekliyor_mu(model_listesi[0]):
             config_parametreleri["tools"] = [types.Tool(google_search=types.GoogleSearch())]
             log_ekle(f" 🔎 {model_listesi[0]} için video analizinde arama aktif")
         config = types.GenerateContentConfig(**config_parametreleri)
