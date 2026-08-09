@@ -16,7 +16,6 @@ from config import (
 )
 from utils import guvenli_json_yukle
 from media import sesi_hizlandir, temp_dosya_temizle, wav_yaz, gecici_dosya_yolu
-from prompts import video_analiz_promptunu_olustur
 
 class SmartRouter:
     def __init__(self) -> None:
@@ -121,7 +120,14 @@ class SmartRouter:
                 log_ekle(f" ⏸️ {model_adi} tüm key'ler için banlı, atlanıyor")
         raise son_hata if son_hata else Exception("Tüm model+key kombinasyonları başarısız.")
 
-    def metin_uret(self, video_icerigi: str, system_prompt: str, response_schema: dict, log_ekle, model_listesi=None, arama_kullan: bool = True) -> Tuple[dict, str]:
+    def metin_uret(self, icerik: Any, system_prompt: str, response_schema: dict, log_ekle, model_listesi=None, arama_kullan: bool = True) -> Tuple[dict, str]:
+        """
+        Genel metin/JSON üretim motoru. Pipeline'daki TÜM metin aşamaları
+        (Research, Editorial, Reels Creative, Caption, Threads, QA) bu tek
+        metodu farklı system_prompt + response_schema + icerik ile çağırır.
+
+        icerik: string ya da (video_part gerekmeyen) parça listesi olabilir.
+        """
         if model_listesi is None:
             model_listesi = METIN_MODELLERI
         config_parametreleri = dict(
@@ -133,7 +139,7 @@ class SmartRouter:
             config_parametreleri["tools"] = [types.Tool(google_search=types.GoogleSearch())]
             log_ekle(f" 🔎 {model_listesi[0]} için güncel bilgi araması aktif")
         config = types.GenerateContentConfig(**config_parametreleri)
-        response, info = self._make_request(model_listesi, video_icerigi, config, log_ekle)
+        response, info = self._make_request(model_listesi, icerik, config, log_ekle)
         return guvenli_json_yukle(getattr(response, "text", "")), info
 
     def ses_uret(self, metin: str, ses_adi: str, cikti_dosyasi: str, log_ekle, hiz_carpani: float = 1.0) -> Tuple[bool, Optional[str]]:
@@ -232,17 +238,42 @@ class SmartRouter:
             log_ekle(f"❌ Ses verisi işlenirken hata: {e}")
             return False, None
 
-    def video_analiz_et(self, video_bytes: bytes, mime_type: str, analiz_notlari: str, sure_saniye: int, log_ekle) -> Tuple[str, str]:
+    def video_analiz_et(
+        self,
+        video_bytes: bytes,
+        mime_type: str,
+        system_prompt: str,
+        response_schema: dict,
+        log_ekle,
+        model_listesi=None,
+        arama_kullan: bool = False,
+    ) -> Tuple[dict, str]:
+        """
+        FORENSIC VIDEO ANALYSIS çağrısı.
+
+        Eski davranıştan farkı: artık serbest metin değil, response_schema'ya
+        uygun YAPILANDIRILMIŞ JSON döner (VIDEO_ANALYSIS_SCHEMA). Prompt ve
+        şema dışarıdan (pipeline.py → prompts.py / schemas.py) verilir; bu
+        metot sadece video + prompt + şemayı SmartRouter mekanizmasıyla
+        (key rotasyonu, model rotasyonu, ban/cooldown) çalıştırır.
+
+        Forensic aşaması varsayılan olarak arama YAPMAZ (arama_kullan=False);
+        araştırma görevi Research/Fact Lock aşamasına aittir.
+        """
+        if model_listesi is None:
+            model_listesi = VIDEO_ANALIZ_MODELLERI
+
         video_part = types.Part.from_bytes(data=video_bytes, mime_type=mime_type)
-        ek_notlar_bolumu = ""
-        if analiz_notlari.strip():
-            ek_notlar_bolumu = f"""
- ÖNEMLİ: Kullanıcı videoyu analiz ettirirken sana şu VİDEO ANALİZ NOTLARINI iletti.
- --- VİDEO ANALİZ NOTLARI ---
- {analiz_notlari}
- -------------------------------
- """
-        analiz_promptu = video_analiz_promptunu_olustur(ek_notlar_bolumu, sure_saniye)
-        config = types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())])
-        response, info = self._make_request(VIDEO_ANALIZ_MODELLERI, [video_part, analiz_promptu], config, log_ekle)
-        return getattr(response, "text", ""), info
+
+        config_parametreleri = dict(
+            system_instruction=system_prompt,
+            response_mime_type="application/json",
+            response_schema=response_schema,
+        )
+        if arama_kullan and model_arama_destekliyor_mu(model_listesi[0]):
+            config_parametreleri["tools"] = [types.Tool(google_search=types.GoogleSearch())]
+            log_ekle(f" 🔎 {model_listesi[0]} için video analizinde arama aktif")
+        config = types.GenerateContentConfig(**config_parametreleri)
+
+        response, info = self._make_request(model_listesi, [video_part], config, log_ekle)
+        return guvenli_json_yukle(getattr(response, "text", "")), info
