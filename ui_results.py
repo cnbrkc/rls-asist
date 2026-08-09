@@ -1,4 +1,21 @@
-"""Sonuç gösterim bileşeni: Video, ses, metinler, AI düşünme zinciri, yeniden ses+video üretme."""
+"""otoXtra sonuç ekranı.
+
+Yeni Ultimate Pipeline sonuçlarını gösterir:
+- Hazır video
+- Ayrı ses
+- Reels caption + hashtag
+- Kapak başlıkları
+- Threads
+- Fact Lock
+- Editorial Brief
+- Hook / Creative stratejisi
+- Final QA
+- Seslendirme metni düzenleme
+- Düzenlenmiş metinden yeniden TTS + video üretme
+
+Eski çalışan UI özellikleri korunmuştur.
+"""
+
 import os
 import re
 import json
@@ -10,138 +27,1247 @@ import streamlit.components.v1 as components
 from config import SES_HIZ_CARPANI
 from utils import markdown_temizle, kapak_basliklarini_formatla
 from storage import tum_kayitlari_sil
-from media import temp_dosya_temizle, video_ve_sesi_birlestir, gecici_ses_yolu, gecici_dosya_yolu
+from media import (
+    temp_dosya_temizle,
+    video_ve_sesi_birlestir,
+    gecici_ses_yolu,
+    gecici_dosya_yolu,
+)
+
+
+# ============================================================
+# YARDIMCI FONKSİYONLAR
+# ============================================================
+
+def _format_temizle(metin) -> str:
+    """Fazla boş satırları temizler."""
+    if metin is None:
+        return ""
+
+    return re.sub(
+        r"\n{3,}",
+        "\n\n",
+        str(metin).strip(),
+    )
+
+
+def _liste_metin(madde_listesi) -> str:
+    """Listeyi güvenli şekilde madde işaretli metne çevirir."""
+    if not madde_listesi:
+        return ""
+
+    if not isinstance(madde_listesi, list):
+        return str(madde_listesi)
+
+    satirlar = []
+
+    for madde in madde_listesi:
+        if isinstance(madde, dict):
+            # Dict ise okunabilir şekilde göster.
+            parcalar = []
+
+            for key, value in madde.items():
+                if value in (None, ""):
+                    continue
+
+                if isinstance(value, list):
+                    value = ", ".join(
+                        str(x) for x in value
+                    )
+
+                parcalar.append(
+                    f"{key}: {value}"
+                )
+
+            if parcalar:
+                satirlar.append(
+                    "• " + " | ".join(parcalar)
+                )
+
+        else:
+            satirlar.append(
+                f"• {madde}"
+            )
+
+    return "\n".join(satirlar)
+
+
+def _durum_badge(durum: str) -> str:
+    """QA durumunu kullanıcı dostu badge'e çevirir."""
+    durum = str(durum or "").upper().strip()
+
+    if durum == "PASS":
+        return "🟢 PASS"
+
+    if durum == "FAIL":
+        return "🔴 FAIL"
+
+    if durum in ("ATLANDI", "SKIPPED"):
+        return "🟡 ATLANDI"
+
+    return f"⚪ {durum or 'BİLİNMİYOR'}"
+
+
+def _qa_satiri(label: str, value) -> None:
+    """QA maddesini düzenli şekilde gösterir."""
+    value = str(value or "").strip()
+
+    if not value:
+        value = "Belirtilmedi."
+
+    value_upper = value.upper()
+
+    if value_upper.startswith("PASS"):
+        st.success(
+            f"**{label}:** {value}"
+        )
+    elif value_upper.startswith("FAIL"):
+        st.error(
+            f"**{label}:** {value}"
+        )
+    else:
+        st.markdown(
+            f"**{label}:** {value}"
+        )
+
+
+def _temizlik_sonrasi_sonucu_sil(sonuc: dict) -> None:
+    """Sonuca ait geçici medya dosyalarını temizler."""
+
+    temizlenecekler = set()
+
+    for anahtar in (
+        "ses_dosyasi",
+        "final_video",
+        "temp_input_video",
+    ):
+        dosya = sonuc.get(anahtar)
+
+        if dosya:
+            temizlenecekler.add(
+                dosya
+            )
+
+    for dosya in st.session_state.get(
+        "gecici_ses_dosyalari",
+        [],
+    ):
+        if dosya:
+            temizlenecekler.add(
+                dosya
+            )
+
+    for dosya in temizlenecekler:
+        try:
+            temp_dosya_temizle(
+                dosya
+            )
+        except Exception:
+            pass
+
+    st.session_state.gecici_ses_dosyalari = []
+
+
+def _copy_button(metin: str, key: str, label: str) -> None:
+    """JS ile tek tıkla kopyalama butonu."""
+
+    js_metin = json.dumps(
+        str(metin),
+        ensure_ascii=False,
+    )
+
+    # key'i JS id'sinde güvenli tut.
+    safe_key = re.sub(
+        r"[^a-zA-Z0-9_]",
+        "_",
+        str(key),
+    )
+
+    button_id = (
+        f"copyBtn_{safe_key}"
+    )
+
+    copy_html = f"""
+<button
+    id="{button_id}"
+    onclick="copyText_{safe_key}()"
+    style="
+        width:100%;
+        height:44px;
+        font-size:15px;
+        font-weight:600;
+        background:linear-gradient(135deg,#1E90FF,#00BFFF);
+        color:#fff;
+        border:none;
+        border-radius:8px;
+        cursor:pointer;
+    "
+>
+    {label}
+</button>
+
+<script>
+async function copyText_{safe_key}() {{
+    const text = {js_metin};
+    const btn = document.getElementById("{button_id}");
+
+    try {{
+        await navigator.clipboard.writeText(text);
+
+        const oldText = btn.innerText;
+        btn.innerText = "✅ Kopyalandı!";
+        btn.style.background = "#28a745";
+
+        setTimeout(() => {{
+            btn.innerText = oldText;
+            btn.style.background =
+                "linear-gradient(135deg,#1E90FF,#00BFFF)";
+        }}, 1800);
+
+    }} catch (err) {{
+        try {{
+            const textArea =
+                document.createElement("textarea");
+
+            textArea.value = text;
+            document.body.appendChild(textArea);
+            textArea.select();
+            document.execCommand("copy");
+            document.body.removeChild(textArea);
+
+            const oldText = btn.innerText;
+            btn.innerText = "✅ Kopyalandı!";
+
+            setTimeout(() => {{
+                btn.innerText = oldText;
+            }}, 1800);
+
+        }} catch (fallbackErr) {{
+            console.log("Copy failed:", fallbackErr);
+        }}
+    }}
+}}
+</script>
+"""
+
+    components.html(
+        copy_html,
+        height=52,
+    )
+
+
+# ============================================================
+# ANA RENDER
+# ============================================================
 
 def render_results(log_ekle, router) -> None:
     """Üretim sonuçlarını ekrana çiz."""
-    if not st.session_state.sonuc:
+
+    if not st.session_state.get("sonuc"):
         return
 
     sonuc = st.session_state.sonuc
-    veri = sonuc["veri"]
-    kullanilan_metin_modeli = sonuc.get("kullanilan_metin_modeli", "?")
-    st.success(f"✅ Başarılı! ({kullanilan_metin_modeli})")
 
-    c1, c2 = st.columns([3, 1])
+    # --------------------------------------------------------
+    # Eski sonuçlarla uyumluluk
+    # --------------------------------------------------------
+
+    veri = sonuc.get(
+        "veri",
+        {},
+    ) or {}
+
+    kullanilan_metin_modeli = sonuc.get(
+        "kullanilan_metin_modeli",
+        "?",
+    )
+
+    pipeline_state = sonuc.get(
+        "pipeline_state",
+        {},
+    ) or {}
+
+    fact_state = sonuc.get(
+        "fact_lock",
+        sonuc.get(
+            "fact_state",
+            pipeline_state.get(
+                "fact_state",
+                {},
+            ),
+        ),
+    ) or {}
+
+    editorial_state = sonuc.get(
+        "editorial_brief",
+        sonuc.get(
+            "editorial_state",
+            pipeline_state.get(
+                "editorial_state",
+                {},
+            ),
+        ),
+    ) or {}
+
+    reels_state = sonuc.get(
+        "reels_state",
+        pipeline_state.get(
+            "reels_state",
+            {},
+        ),
+    ) or {}
+
+    caption_state = sonuc.get(
+        "caption_state",
+        pipeline_state.get(
+            "caption_state",
+            {},
+        ),
+    ) or {}
+
+    threads_state = sonuc.get(
+        "threads_state",
+        pipeline_state.get(
+            "threads_state",
+            {},
+        ),
+    ) or {}
+
+    qa_result = sonuc.get(
+        "qa_result",
+        sonuc.get(
+            "qa_state_final",
+            pipeline_state.get(
+                "qa_state_final",
+                {},
+            ),
+        ),
+    ) or {}
+
+    qa_initial = sonuc.get(
+        "qa_state_ilk",
+        pipeline_state.get(
+            "qa_state_ilk",
+            {},
+        ),
+    ) or {}
+
+    selected_hook = sonuc.get(
+        "selected_hook",
+        {},
+    ) or {}
+
+    # ========================================================
+    # BAŞLIK / DURUM
+    # ========================================================
+
+    overall = str(
+        qa_result.get(
+            "overall",
+            "",
+        )
+    ).upper()
+
+    if overall == "PASS":
+        st.success(
+            f"✅ Üretim tamamlandı! "
+            f"QA: {_durum_badge(overall)} "
+            f"({kullanilan_metin_modeli})"
+        )
+
+    elif overall == "FAIL":
+        st.warning(
+            f"⚠️ Üretim tamamlandı ancak "
+            f"QA'da uyarı var: {_durum_badge(overall)}"
+        )
+
+    else:
+        st.success(
+            f"✅ Başarılı! "
+            f"({kullanilan_metin_modeli})"
+        )
+
+    # ========================================================
+    # TEMİZLE
+    # ========================================================
+
+    c1, c2 = st.columns(
+        [3, 1]
+    )
+
     with c2:
-        if st.button("🗑️ Geçmiş Üretimleri Temizle", use_container_width=True):
-            if sonuc.get("ses_dosyasi") and os.path.exists(sonuc["ses_dosyasi"]):
-                temp_dosya_temizle(sonuc["ses_dosyasi"])
-            if sonuc.get("final_video") and os.path.exists(sonuc["final_video"]):
-                temp_dosya_temizle(sonuc["final_video"])
-            if sonuc.get("temp_input_video") and os.path.exists(sonuc["temp_input_video"]):
-                temp_dosya_temizle(sonuc["temp_input_video"])
-            for dosya in st.session_state.gecici_ses_dosyalari:
-                temp_dosya_temizle(dosya)
-            st.session_state.gecici_ses_dosyalari = []
+
+        if st.button(
+            "🗑️ Geçmiş Üretimleri Temizle",
+            use_container_width=True,
+            key="clear_all_results",
+        ):
+
+            _temizlik_sonrasi_sonucu_sil(
+                sonuc
+            )
+
             st.session_state.sonuc = None
             st.session_state.log_satirlari = []
-            st.session_state._sonuc_versiyon += 1
+
+            st.session_state._sonuc_versiyon = (
+                st.session_state.get(
+                    "_sonuc_versiyon",
+                    0,
+                ) + 1
+            )
+
             tum_kayitlari_sil()
+
             st.rerun()
 
-    st.markdown("### 🎬 Hazır Video (AI Sesli)")
-    st.markdown("**📺 AI Ses Eklenmiş Video** (Orijinal video + AI seslendirme)")
+    # ========================================================
+    # 1. HAZIR VIDEO
+    # ========================================================
 
-    if sonuc.get("final_video") and os.path.exists(sonuc["final_video"]):
-        with open(sonuc["final_video"], "rb") as f:
-            vid_bytes = f.read()
+    st.markdown(
+        "### 🎬 Hazır Video (AI Sesli)"
+    )
 
-        show_generated = st.toggle("👁️ Üretilen Videoyu Göster", value=False, key="show_generated_video")
-        if show_generated:
-            st.video(vid_bytes)
+    st.markdown(
+        "**📺 AI Ses Eklenmiş Video** "
+        "(Orijinal video + AI seslendirme)"
+    )
 
-        c_dl, c_share = st.columns(2)
-        with c_dl:
-            st.download_button(
-                "⬇️ İndir (.mp4)",
-                vid_bytes,
-                file_name="otoxtra_sesli.mp4",
-                mime="video/mp4",
-                use_container_width=True
+    final_video = sonuc.get(
+        "final_video",
+        "",
+    )
+
+    if (
+        final_video
+        and os.path.exists(final_video)
+    ):
+
+        try:
+
+            with open(
+                final_video,
+                "rb",
+            ) as f:
+                vid_bytes = f.read()
+
+            show_generated = st.toggle(
+                "👁️ Üretilen Videoyu Göster",
+                value=False,
+                key="show_generated_video",
             )
-        with c_share:
-            vid_b64 = base64.b64encode(vid_bytes).decode()
-            components.html(f"""
+
+            if show_generated:
+                st.video(
+                    vid_bytes
+                )
+
+            c_dl, c_share = st.columns(
+                2
+            )
+
+            with c_dl:
+
+                st.download_button(
+                    "⬇️ İndir (.mp4)",
+                    vid_bytes,
+                    file_name="otoxtra_sesli.mp4",
+                    mime="video/mp4",
+                    use_container_width=True,
+                    key="download_generated_video",
+                )
+
+            with c_share:
+
+                vid_b64 = base64.b64encode(
+                    vid_bytes
+                ).decode()
+
+                components.html(
+                    f"""
 <button onclick="shareVideo()" style="
-    width:100%;height:48px;font-size:16px;font-weight:600;
+    width:100%;
+    height:48px;
+    font-size:16px;
+    font-weight:600;
     background:linear-gradient(135deg,#ff4b4b,#ff6b6b);
-    color:#fff;border:none;border-radius:8px;cursor:pointer;
-">📤 Paylaş / Galeri Kaydet</button>
+    color:#fff;
+    border:none;
+    border-radius:8px;
+    cursor:pointer;
+">
+    📤 Paylaş / Galeri Kaydet
+</button>
+
 <script>
 async function shareVideo() {{
     try {{
         const b64 = "{vid_b64}";
         const bin = atob(b64);
         const arr = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-        const file = new File([arr], 'otoxtra_sesli.mp4', {{ type: 'video/mp4' }});
-        if (navigator.share && navigator.canShare({{ files: [file] }})) {{
-            await navigator.share({{ files: [file], title: 'otoXtra Video' }});
+
+        for (
+            let i = 0;
+            i < bin.length;
+            i++
+        ) {{
+            arr[i] = bin.charCodeAt(i);
+        }}
+
+        const file = new File(
+            [arr],
+            "otoxtra_sesli.mp4",
+            {{ type: "video/mp4" }}
+        );
+
+        if (
+            navigator.share &&
+            navigator.canShare({{ files: [file] }})
+        ) {{
+            await navigator.share({{
+                files: [file],
+                title: "otoXtra Video"
+            }});
         }} else {{
-            const url = URL.createObjectURL(file);
-            const a = document.createElement('a');
-            a.href = url; a.download = 'otoxtra_sesli.mp4'; a.click();
+            const url =
+                URL.createObjectURL(file);
+
+            const a =
+                document.createElement("a");
+
+            a.href = url;
+            a.download =
+                "otoxtra_sesli.mp4";
+
+            a.click();
+
             URL.revokeObjectURL(url);
         }}
+
     }} catch(e) {{
-        console.log('Share:', e);
+        console.log("Share:", e);
     }}
 }}
 </script>
-""", height=55)
+""",
+                    height=55,
+                )
+
+        except Exception as video_hata:
+
+            st.warning(
+                "⚠️ Üretilen video okunamadı."
+            )
+
+            if log_ekle:
+                log_ekle(
+                    f"⚠️ Sonuç videosu okunamadı: "
+                    f"{str(video_hata)[:200]}"
+                )
+
     else:
-        st.warning("⚠️ Video dosyası oluşturulamadı (ffmpeg hatası). Sadece ses mevcut.")
+
+        st.warning(
+            "⚠️ Video dosyası oluşturulamadı "
+            "(ffmpeg hatası veya dosya artık mevcut değil). "
+            "Sadece ses mevcut olabilir."
+        )
 
     st.divider()
 
-    st.markdown("### 🎧 Medya (Ayrı Ses)")
-    st.markdown(f"**🎙️ Seslendirme** (model: {sonuc.get('kullanilan_ses_modeli', '?')})")
-    if sonuc["ses_basarili"] and os.path.exists(sonuc["ses_dosyasi"]):
-        with open(sonuc["ses_dosyasi"], "rb") as f:
+    # ========================================================
+    # 2. MEDYA / SES
+    # ========================================================
+
+    st.markdown(
+        "### 🎧 Medya (Ayrı Ses)"
+    )
+
+    st.markdown(
+        f"**🎙️ Seslendirme** "
+        f"(model: {sonuc.get('kullanilan_ses_modeli', '?')})"
+    )
+
+    ses_basarili = bool(
+        sonuc.get(
+            "ses_basarili",
+            False,
+        )
+    )
+
+    ses_dosyasi = sonuc.get(
+        "ses_dosyasi",
+        "",
+    )
+
+    if (
+        ses_basarili
+        and ses_dosyasi
+        and os.path.exists(ses_dosyasi)
+    ):
+
+        with open(
+            ses_dosyasi,
+            "rb",
+        ) as f:
             ses_byte = f.read()
-        st.audio(ses_byte, format="audio/wav")
+
+        st.audio(
+            ses_byte,
+            format="audio/wav",
+        )
+
         st.download_button(
-            f"⬇️ {sonuc['secilen_ses_ingilizce']} Sesini İndir (.wav)",
+            f"⬇️ "
+            f"{sonuc.get('secilen_ses_ingilizce', 'Ses')} "
+            f"Sesini İndir (.wav)",
             ses_byte,
             file_name="seslendirme.wav",
-            mime="audio/wav"
+            mime="audio/wav",
+            key="download_voiceover",
         )
+
     else:
-        if kullanilan_metin_modeli == "geçmiş":
-            st.info("📝 Ayrıntılı geçmiş kayıt. Ses dosyası artık mevcut değil.")
+
+        if (
+            kullanilan_metin_modeli
+            == "geçmiş"
+        ):
+            st.info(
+                "📝 Ayrıntılı geçmiş kayıt. "
+                "Ses dosyası artık mevcut değil."
+            )
+
         else:
-            st.warning("Ses dosyası bulunamadı.")
+            st.warning(
+                "Ses dosyası bulunamadı."
+            )
 
     st.divider()
 
-    # ============================================================
-    # YENİ METİN GÖSTERİMİ (TEK KUTU + KOPYALA BUTONU)
-    # ============================================================
-    st.markdown("### 📝 Metin İçerikleri (Toplu)")
-    
-    # 1. Verileri al
-    aciklama_metni = markdown_temizle(veri.get("reels_aciklamasi", ""))
-    hashtagler = veri.get("reels_hashtagleri", [])
-    if hashtagler and isinstance(hashtagler, list):
-        hashtag_str = " ".join([h if str(h).startswith("#") else f"#{h}" for h in hashtagler])
-        tam_aciklama = f"{aciklama_metni}\n\n{hashtag_str}"
+    # ========================================================
+    # 3. YENİ PIPELINE ÖZETİ
+    # ========================================================
+
+    st.markdown(
+        "### 🧠 İçerik Stratejisi"
+    )
+
+    st.caption(
+        "Yeni pipeline'ın video → araştırma → "
+        "editoryal → yaratıcı kararlarını özetler."
+    )
+
+    # --------------------------------------------------------
+    # Video Identity
+    # --------------------------------------------------------
+
+    video_state = pipeline_state.get(
+        "video_state",
+        {},
+    ) or {}
+
+    video_identity = video_state.get(
+        "video_identity",
+        {},
+    ) or {}
+
+    if video_identity:
+
+        with st.expander(
+            "🎥 1. Video Forensic Analysis",
+            expanded=False,
+        ):
+
+            marka = video_identity.get(
+                "brand",
+                "?",
+            )
+
+            model = video_identity.get(
+                "exact_model",
+                "?",
+            )
+
+            confidence = video_identity.get(
+                "confidence",
+                "?",
+            )
+
+            st.markdown(
+                f"**Araç:** {marka} {model}"
+            )
+
+            st.markdown(
+                f"**Güven:** {confidence}"
+            )
+
+            observed_facts = video_state.get(
+                "observed_facts",
+                [],
+            )
+
+            unknowns = video_state.get(
+                "unknowns",
+                [],
+            )
+
+            visual_opportunities = video_state.get(
+                "visual_opportunities",
+                [],
+            )
+
+            if observed_facts:
+                st.markdown(
+                    "**Gözlemlenen gerçekler:**"
+                )
+
+                st.markdown(
+                    _liste_metin(
+                        observed_facts
+                    )
+                )
+
+            if unknowns:
+                st.markdown(
+                    "**Bilinmeyenler:**"
+                )
+
+                st.markdown(
+                    _liste_metin(
+                        unknowns
+                    )
+                )
+
+            if visual_opportunities:
+                st.markdown(
+                    "**Görsel fırsatlar:**"
+                )
+
+                st.markdown(
+                    _liste_metin(
+                        visual_opportunities
+                    )
+                )
+
+    # --------------------------------------------------------
+    # Fact Lock
+    # --------------------------------------------------------
+
+    with st.expander(
+        "🔒 2. Research / Fact Lock",
+        expanded=False,
+    ):
+
+        satis_durumu = fact_state.get(
+            "turkiye_satis_durumu",
+            "BILINMIYOR",
+        )
+
+        st.markdown(
+            f"**Türkiye satış durumu:** "
+            f"`{satis_durumu}`"
+        )
+
+        turkiye_fiyati = fact_state.get(
+            "turkiye_fiyati",
+            "",
+        )
+
+        if turkiye_fiyati:
+            st.markdown(
+                f"**Türkiye fiyatı:** "
+                f"{turkiye_fiyati}"
+            )
+
+        global_fiyat = fact_state.get(
+            "global_fiyat_bilgisi",
+            "",
+        )
+
+        if global_fiyat:
+            st.markdown(
+                f"**Global fiyat bilgisi:** "
+                f"{global_fiyat}"
+            )
+
+        facts = fact_state.get(
+            "facts",
+            [],
+        )
+
+        if facts:
+
+            st.markdown(
+                "**Doğrulanan / tespit edilen bilgiler:**"
+            )
+
+            for index, fact in enumerate(
+                facts,
+                start=1,
+            ):
+
+                if isinstance(
+                    fact,
+                    dict,
+                ):
+
+                    fact_text = fact.get(
+                        "fact",
+                        "",
+                    )
+
+                    status = fact.get(
+                        "status",
+                        "",
+                    )
+
+                    source = fact.get(
+                        "source",
+                        "",
+                    )
+
+                    confidence = fact.get(
+                        "confidence",
+                        "",
+                    )
+
+                    st.markdown(
+                        f"**{index}.** {fact_text}"
+                    )
+
+                    meta = []
+
+                    if status:
+                        meta.append(
+                            f"Durum: `{status}`"
+                        )
+
+                    if confidence:
+                        meta.append(
+                            f"Güven: `{confidence}`"
+                        )
+
+                    if source:
+                        meta.append(
+                            f"Kaynak: {source}"
+                        )
+
+                    if meta:
+                        st.caption(
+                            " • ".join(meta)
+                        )
+
+                else:
+
+                    st.markdown(
+                        f"**{index}.** {fact}"
+                    )
+
+        arastirma_notu = fact_state.get(
+            "arastirma_notu",
+            "",
+        )
+
+        if arastirma_notu:
+            st.info(
+                f"**Araştırma notu:** "
+                f"{arastirma_notu}"
+            )
+
+    # --------------------------------------------------------
+    # Editorial
+    # --------------------------------------------------------
+
+    with st.expander(
+        "📖 3. Editorial Brain",
+        expanded=False,
+    ):
+
+        core_story = editorial_state.get(
+            "core_story",
+            "",
+        )
+
+        if core_story:
+            st.markdown(
+                f"### 🎯 Seçilen Hikâye\n{core_story}"
+            )
+
+        why_it_matters = editorial_state.get(
+            "why_it_matters",
+            "",
+        )
+
+        if why_it_matters:
+            st.markdown(
+                f"**Neden önemli?**\n\n"
+                f"{why_it_matters}"
+            )
+
+        audience_trigger = editorial_state.get(
+            "audience_trigger",
+            "",
+        )
+
+        if audience_trigger:
+            st.markdown(
+                f"**İzleyici tetikleyicisi:** "
+                f"{audience_trigger}"
+            )
+
+        discussion_territory = editorial_state.get(
+            "discussion_territory",
+            "",
+        )
+
+        if discussion_territory:
+            st.markdown(
+                f"**Tartışma alanı:** "
+                f"{discussion_territory}"
+            )
+
+        primary_facts = editorial_state.get(
+            "primary_facts",
+            [],
+        )
+
+        if primary_facts:
+            st.markdown(
+                "**Hikâyeyi destekleyen ana gerçekler:**"
+            )
+
+            st.markdown(
+                _liste_metin(
+                    primary_facts
+                )
+            )
+
+        things_to_avoid = editorial_state.get(
+            "things_to_avoid",
+            [],
+        )
+
+        if things_to_avoid:
+            st.markdown(
+                "**Kaçınılacaklar:**"
+            )
+
+            st.markdown(
+                _liste_metin(
+                    things_to_avoid
+                )
+            )
+
+    # --------------------------------------------------------
+    # Reels Creative / Hook
+    # --------------------------------------------------------
+
+    with st.expander(
+        "🎨 4. Reels Creative — Hook / Cover",
+        expanded=False,
+    ):
+
+        if selected_hook:
+
+            st.markdown(
+                "### ⭐ Seçilen Hook Ailesi"
+            )
+
+            kapak_ana = selected_hook.get(
+                "kapak_ana",
+                "",
+            )
+
+            kapak_alt = selected_hook.get(
+                "kapak_alt",
+                "",
+            )
+
+            ilk_uc_saniye = selected_hook.get(
+                "ilk_uc_saniye",
+                "",
+            )
+
+            anlati_yonu = selected_hook.get(
+                "anlati_yonu",
+                "",
+            )
+
+            if kapak_ana:
+                st.markdown(
+                    f"**Kapak ana:** "
+                    f"{kapak_ana}"
+                )
+
+            if kapak_alt:
+                st.markdown(
+                    f"**Kapak alt:** "
+                    f"{kapak_alt}"
+                )
+
+            if ilk_uc_saniye:
+                st.markdown(
+                    f"**İlk 3 saniye / Voice Hook:** "
+                    f"{ilk_uc_saniye}"
+                )
+
+            if anlati_yonu:
+                st.markdown(
+                    f"**Anlatı yönü:** "
+                    f"{anlati_yonu}"
+                )
+
+            score_fields = [
+                (
+                    "Merak",
+                    "curiosity_score",
+                ),
+                (
+                    "Görsel eşleşme",
+                    "visual_match_score",
+                ),
+                (
+                    "Gerçek gücü",
+                    "fact_strength_score",
+                ),
+                (
+                    "Özgünlük",
+                    "originality_score",
+                ),
+                (
+                    "Retention",
+                    "retention_score",
+                ),
+            ]
+
+            scores = []
+
+            for label, key in score_fields:
+
+                value = selected_hook.get(
+                    key
+                )
+
+                if isinstance(
+                    value,
+                    (int, float),
+                ):
+
+                    scores.append(
+                        f"{label}: {value}"
+                    )
+
+            if scores:
+                st.caption(
+                    " • ".join(scores)
+                )
+
+        hook_families = reels_state.get(
+            "hook_families",
+            [],
+        )
+
+        if hook_families:
+
+            st.markdown(
+                "### Diğer Hook Aileleri"
+            )
+
+            for index, hook in enumerate(
+                hook_families,
+                start=1,
+            ):
+
+                if not isinstance(
+                    hook,
+                    dict,
+                ):
+                    continue
+
+                kapak = hook.get(
+                    "kapak_ana",
+                    "",
+                )
+
+                alt = hook.get(
+                    "kapak_alt",
+                    "",
+                )
+
+                hook_text = hook.get(
+                    "ilk_uc_saniye",
+                    "",
+                )
+
+                st.markdown(
+                    f"**{index}.** "
+                    f"{kapak}"
+                )
+
+                if alt:
+                    st.caption(
+                        f"Alt: {alt}"
+                    )
+
+                if hook_text:
+                    st.caption(
+                        f"Hook: {hook_text}"
+                    )
+
+        # Yeni creative motorun stratejik notları.
+        beyin_firtinasi = reels_state.get(
+            "beyin_firtinasi",
+            "",
+        )
+
+        veri_kilitleme = reels_state.get(
+            "veri_kilitleme",
+            "",
+        )
+
+        oz_elestiri = reels_state.get(
+            "oz_elestiri",
+            "",
+        )
+
+        if (
+            beyin_firtinasi
+            or veri_kilitleme
+            or oz_elestiri
+        ):
+
+            st.markdown(
+                "### Creative Strateji Notları"
+            )
+
+            if beyin_firtinasi:
+                st.markdown(
+                    "**Beyin fırtınası:**"
+                )
+                st.info(
+                    beyin_firtinasi
+                )
+
+            if veri_kilitleme:
+                st.markdown(
+                    "**Veri kilitleme:**"
+                )
+                st.warning(
+                    veri_kilitleme
+                )
+
+            if oz_elestiri:
+                st.markdown(
+                    "**Öz denetim:**"
+                )
+                st.error(
+                    oz_elestiri
+                )
+
+    # ========================================================
+    # 4. METİN İÇERİKLERİ
+    # ========================================================
+
+    st.divider()
+
+    st.markdown(
+        "### 📝 Metin İçerikleri (Toplu)"
+    )
+
+    # Pipeline'dan gelen yeni state varsa onu önceliklendir.
+    aciklama_raw = caption_state.get(
+        "reels_aciklamasi",
+        veri.get(
+            "reels_aciklamasi",
+            "",
+        ),
+    )
+
+    hashtagler = caption_state.get(
+        "reels_hashtagleri",
+        veri.get(
+            "reels_hashtagleri",
+            [],
+        ),
+    )
+
+    kapak_raw = reels_state.get(
+        "kapak_basliklari",
+        veri.get(
+            "kapak_basliklari",
+            [],
+        ),
+    )
+
+    threads_raw = threads_state.get(
+        "threads_aciklamasi",
+        veri.get(
+            "threads_aciklamasi",
+            "",
+        ),
+    )
+
+    aciklama_metni = markdown_temizle(
+        aciklama_raw
+    )
+
+    # --------------------------------------------------------
+    # Hashtagleri normalize et
+    # --------------------------------------------------------
+
+    if (
+        hashtagler
+        and isinstance(
+            hashtagler,
+            list,
+        )
+    ):
+
+        hashtag_str = " ".join(
+            (
+                h
+                if str(h).startswith("#")
+                else f"#{h}"
+            )
+            for h in hashtagler
+        )
+
+        tam_aciklama = (
+            f"{aciklama_metni}\n\n"
+            f"{hashtag_str}"
+        )
+
     else:
-        tam_aciklama = aciklama_metni
-        
-    basliklar = kapak_basliklarini_formatla(veri.get("kapak_basliklari"))
-    threads = markdown_temizle(veri.get("threads_aciklamasi", ""))
 
-    # 2. Garanti Formatlama (AI bazen 3-4 enter basarsa bunu tek enter'a düşürür)
-    def format_temizle(metin):
-        return re.sub(r'\n{3,}', '\n\n', str(metin).strip())
+        tam_aciklama = (
+            aciklama_metni
+        )
 
-    tam_aciklama = format_temizle(tam_aciklama)
-    basliklar = format_temizle(basliklar)
-    threads = format_temizle(threads)
+    basliklar = kapak_basliklarini_formatla(
+        kapak_raw
+    )
 
-    # 3. Ayraç ve birleştirme
-    ayrac = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    threads = markdown_temizle(
+        threads_raw
+    )
+
+    tam_aciklama = _format_temizle(
+        tam_aciklama
+    )
+
+    basliklar = _format_temizle(
+        basliklar
+    )
+
+    threads = _format_temizle(
+        threads
+    )
+
+    ayrac = (
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    )
 
     birlesik_metin = f"""📌 REELS AÇIKLAMASI
 {tam_aciklama}
@@ -157,132 +1283,621 @@ async function shareVideo() {{
 {threads}
 """
 
-    # 4. Kopyalama Butonu (JS ile tek tıkla kopyalama)
-    js_metin = json.dumps(birlesik_metin)
+    _copy_button(
+        birlesik_metin,
+        "all_texts",
+        "📋 Tüm Metinleri Kopyala "
+        "(Reels + Başlıklar + Threads)",
+    )
 
-    copy_html = f"""
-    <button onclick="copyAllText()" id="copyBtn" style="
-        width:100%;height:48px;font-size:16px;font-weight:600;
-        background:linear-gradient(135deg,#1E90FF,#00BFFF);
-        color:#fff;border:none;border-radius:8px;cursor:pointer;
-        margin-bottom:10px;
-    ">📋 Tüm Metinleri Kopyala (Reels + Başlıklar + Threads)</button>
-    <script>
-    async function copyAllText() {{
-        const text = {js_metin};
-        try {{
-            await navigator.clipboard.writeText(text);
-            const btn = document.getElementById("copyBtn");
-            const oldText = btn.innerText;
-            btn.innerText = "✅ Kopyalandı!";
-            btn.style.background = "#28a745";
-            setTimeout(() => {{
-                btn.innerText = oldText;
-                btn.style.background = "linear-gradient(135deg,#1E90FF,#00BFFF)";
-            }}, 2000);
-        }} catch (err) {{
-            const textArea = document.createElement("textarea");
-            textArea.value = text;
-            document.body.appendChild(textArea);
-            textArea.select();
-            document.execCommand("copy");
-            document.body.removeChild(textArea);
-        }}
-    }}
-    </script>
-    """
-    components.html(copy_html, height=60)
-    
-    # 5. Birleşik Kutu
     st.text_area(
         "Birleşik Metinler",
         value=birlesik_metin,
         height=450,
-        label_visibility="collapsed"
+        label_visibility="collapsed",
+        key="birlesik_metin_display",
     )
-    # ============================================================
-    # METİN GÖSTERİMİ SONU
-    # ============================================================
+
+    # ========================================================
+    # 5. AYRI AYRI METİN DETAYLARI
+    # ========================================================
+
+    with st.expander(
+        "📌 Reels Caption Detayı",
+        expanded=False,
+    ):
+
+        st.text_area(
+            "Reels Caption",
+            value=aciklama_metni,
+            height=220,
+            label_visibility="collapsed",
+            key="reels_caption_detail",
+        )
+
+        if hashtagler:
+
+            st.markdown(
+                "**Hashtagler:**"
+            )
+
+            st.code(
+                hashtag_str
+                if "hashtag_str" in locals()
+                else " ".join(
+                    f"#{h}"
+                    for h in hashtagler
+                ),
+                language=None,
+            )
+
+    with st.expander(
+        "📌 Kapak Başlıkları",
+        expanded=False,
+    ):
+
+        st.text_area(
+            "Kapak Başlıkları",
+            value=basliklar,
+            height=220,
+            label_visibility="collapsed",
+            key="cover_titles_detail",
+        )
+
+    with st.expander(
+        "🧵 Threads",
+        expanded=False,
+    ):
+
+        st.text_area(
+            "Threads",
+            value=threads,
+            height=180,
+            label_visibility="collapsed",
+            key="threads_detail",
+        )
+
+    # ========================================================
+    # 6. FINAL QA
+    # ========================================================
 
     st.divider()
 
-    st.markdown("### 🧠 AI Düşünme Zinciri (Strateji)")
-    with st.expander("Yapay Zekanın İç Monoloğunu Gör (Nasıl Karar Verdi?)"):
-        st.markdown("**1. Beyin Fırtınası:**")
-        st.info(veri.get("beyin_firtinasi", "Veri bulunamadı."))
-        st.markdown("**2. Veri Kilitleme:**")
-        st.warning(veri.get("veri_kilitleme", "Veri bulunamadı."))
-        st.markdown("**3. Öz Eleştiri:**")
-        st.error(veri.get("oz_elestiri", "Veri bulunamadı."))
+    st.markdown(
+        "### 🧪 Final QA"
+    )
+
+    st.caption(
+        "QA yeni içerik üretmez; üretilen içeriği "
+        "hakem gibi denetler."
+    )
+
+    if qa_result:
+
+        overall = qa_result.get(
+            "overall",
+            "BILINMIYOR",
+        )
+
+        if str(overall).upper() == "PASS":
+
+            st.success(
+                f"🟢 Final QA: **PASS**"
+            )
+
+        elif str(overall).upper() == "FAIL":
+
+            st.warning(
+                f"🔴 Final QA: **FAIL**"
+            )
+
+        else:
+
+            st.info(
+                f"🟡 Final QA: "
+                f"**{overall}**"
+            )
+
+        regeneration_targets = qa_result.get(
+            "regeneration_targets",
+            [],
+        ) or []
+
+        if regeneration_targets:
+
+            st.warning(
+                "Yeniden üretim tetikleyen alanlar: "
+                + ", ".join(
+                    str(x)
+                    for x in regeneration_targets
+                )
+            )
+
+        qa_items = [
+            (
+                "🔒 Fact Check",
+                "fact_check",
+            ),
+            (
+                "🤖 Model Check",
+                "model_check",
+            ),
+            (
+                "🎥 Video Check",
+                "video_check",
+            ),
+            (
+                "🌐 Current Data Check",
+                "current_data_check",
+            ),
+            (
+                "🖼️ Cover Check",
+                "cover_check",
+            ),
+            (
+                "🪝 Hook Check",
+                "hook_check",
+            ),
+            (
+                "👀 Visual Match",
+                "visual_match_check",
+            ),
+            (
+                "♻️ Repetition Check",
+                "repetition_check",
+            ),
+            (
+                "🎙️ TTS Check",
+                "tts_check",
+            ),
+            (
+                "📏 Length Check",
+                "length_check",
+            ),
+            (
+                "📝 Caption Check",
+                "caption_check",
+            ),
+            (
+                "#️⃣ Hashtag Check",
+                "hashtag_check",
+            ),
+            (
+                "🧵 Threads Check",
+                "threads_check",
+            ),
+            (
+                "🏎️ Brand Check",
+                "brand_check",
+            ),
+        ]
+
+        for label, key in qa_items:
+
+            value = qa_result.get(
+                key,
+                "",
+            )
+
+            if value:
+                _qa_satiri(
+                    label,
+                    value,
+                )
+
+        # ----------------------------------------------------
+        # İlk QA ile final QA karşılaştırması
+        # ----------------------------------------------------
+
+        if qa_initial:
+
+            ilk_overall = qa_initial.get(
+                "overall",
+                "",
+            )
+
+            final_overall = qa_result.get(
+                "overall",
+                "",
+            )
+
+            if (
+                ilk_overall
+                and final_overall
+                and str(ilk_overall).upper()
+                != str(final_overall).upper()
+            ):
+
+                st.info(
+                    f"🔄 QA sonucu yeniden üretim sonrası "
+                    f"**{ilk_overall} → {final_overall}** "
+                    f"olarak değişti."
+                )
+
+    else:
+
+        st.info(
+            "QA sonucu bulunamadı."
+        )
+
+    # ========================================================
+    # 7. SESLENDİRME METNİ
+    # ========================================================
 
     st.divider()
 
-    st.markdown("### 🎙️ Seslendirme Metni")
-    st.caption("TTS için üretilen metin. Düzenleyip yeniden ses ve video üretebilirsiniz.")
+    st.markdown(
+        "### 🎙️ Seslendirme Metni"
+    )
 
-    # Sonuç değiştiyse widget key'i temizle
-    if st.session_state._sonuc_versiyon != st.session_state._sonuc_versiyon_last:
-        st.session_state._sonuc_versiyon_last = st.session_state._sonuc_versiyon
-        if "duzenlenmis_ses_metni_widget" in st.session_state:
-            del st.session_state["duzenlenmis_ses_metni_widget"]
+    st.caption(
+        "TTS için üretilen metin. "
+        "İstersen düzenleyip yeniden ses ve video üretebilirsin."
+    )
+
+    # --------------------------------------------------------
+    # Sonuç değiştiyse widget state'i yenile
+    # --------------------------------------------------------
+
+    current_version = st.session_state.get(
+        "_sonuc_versiyon",
+        0,
+    )
+
+    last_version = st.session_state.get(
+        "_sonuc_versiyon_last",
+        -1,
+    )
+
+    if current_version != last_version:
+
+        st.session_state[
+            "_sonuc_versiyon_last"
+        ] = current_version
+
+        if (
+            "duzenlenmis_ses_metni_widget"
+            in st.session_state
+        ):
+
+            del st.session_state[
+                "duzenlenmis_ses_metni_widget"
+            ]
+
+    seslendirme_metni = veri.get(
+        "seslendirme_metni",
+        sonuc.get(
+            "seslendirme_metni",
+            "",
+        ),
+    )
 
     duzenlenmis_ses_metni = st.text_area(
         "Seslendirme Metni",
-        value=st.session_state.get("duzenlenmis_ses_metni_widget", veri.get("seslendirme_metni", "")),
+        value=st.session_state.get(
+            "duzenlenmis_ses_metni_widget",
+            seslendirme_metni,
+        ),
         height=300,
         label_visibility="collapsed",
         key="duzenlenmis_ses_metni_widget",
     )
 
-    if st.button("🔄 Bu Metinle Yeniden Ses ve Video Üret"):
-        with st.spinner("Ses ve video yeniden üretiliyor..."):
-            yeni_ses_dosyasi = gecici_ses_yolu()
-            ses_basarili_yeni, kullanilan_ses_modeli_yeni = router.ses_uret(
-                duzenlenmis_ses_metni,
-                sonuc["secilen_ses_ingilizce"],
-                yeni_ses_dosyasi,
-                log_ekle,
-                hiz_carpani=SES_HIZ_CARPANI,
+    # ========================================================
+    # 8. YENİDEN SES + VIDEO
+    # ========================================================
+
+    if st.button(
+        "🔄 Bu Metinle Yeniden Ses ve Video Üret",
+        use_container_width=True,
+        key="regenerate_audio_video",
+    ):
+
+        temiz_metin = (
+            duzenlenmis_ses_metni
+            or ""
+        ).strip()
+
+        if not temiz_metin:
+
+            st.error(
+                "❌ Seslendirme metni boş olamaz."
             )
-            if ses_basarili_yeni and os.path.exists(yeni_ses_dosyasi):
-                # Eski ses dosyasını temizle
-                eski_ses_dosyasi = sonuc.get("ses_dosyasi", "")
-                if eski_ses_dosyasi and os.path.exists(eski_ses_dosyasi):
-                    temp_dosya_temizle(eski_ses_dosyasi)
-                if eski_ses_dosyasi in st.session_state.gecici_ses_dosyalari:
-                    st.session_state.gecici_ses_dosyalari.remove(eski_ses_dosyasi)
-                st.session_state.gecici_ses_dosyalari.append(yeni_ses_dosyasi)
 
-                # Video + ses birleştirme (orijinal video varsa)
-                temp_input_video = sonuc.get("temp_input_video", "")
-                if temp_input_video and os.path.exists(temp_input_video):
-                    yeni_output_video = gecici_dosya_yolu("output", "mp4")
+        else:
 
-                    render_basarili = video_ve_sesi_birlestir(
-                        temp_input_video,
-                        yeni_ses_dosyasi,
-                        yeni_output_video,
-                        log_ekle
+            with st.spinner(
+                "🎧 Ses ve video yeniden üretiliyor..."
+            ):
+
+                yeni_ses_dosyasi = (
+                    gecici_ses_yolu()
+                )
+
+                try:
+
+                    ses_basarili_yeni, kullanilan_ses_modeli_yeni = (
+                        router.ses_uret(
+                            temiz_metin,
+                            sonuc.get(
+                                "secilen_ses_ingilizce",
+                                "",
+                            ),
+                            yeni_ses_dosyasi,
+                            log_ekle,
+                            hiz_carpani=SES_HIZ_CARPANI,
+                        )
                     )
-                    if render_basarili and os.path.exists(yeni_output_video):
-                        # Eski videoyu temizle
-                        eski_video = sonuc.get("final_video", "")
-                        if eski_video and os.path.exists(eski_video):
-                            temp_dosya_temizle(eski_video)
-                        st.session_state.sonuc["final_video"] = yeni_output_video
-                        log_ekle("✅ Yeni video başarıyla üretildi.")
-                    else:
-                        log_ekle("⚠️ Video birleştirme başarısız, sadece ses güncellendi.")
-                else:
-                    log_ekle("⚠️ Orijinal video dosyası bulunamadı, sadece ses güncellendi.")
 
-                st.session_state.sonuc["ses_dosyasi"] = yeni_ses_dosyasi
-                st.session_state.sonuc["ses_basarili"] = True
-                st.session_state.sonuc["veri"]["seslendirme_metni"] = duzenlenmis_ses_metni
-                if kullanilan_ses_modeli_yeni:
-                    st.session_state.sonuc["kullanilan_ses_modeli"] = kullanilan_ses_modeli_yeni
-                st.rerun()
-            else:
-                st.error("❌ Ses üretilemedi. Logları kontrol edin.")
-                if os.path.exists(yeni_ses_dosyasi):
-                    temp_dosya_temizle(yeni_ses_dosyasi)
+                    # ------------------------------------------------
+                    # TTS başarılı
+                    # ------------------------------------------------
+
+                    if (
+                        ses_basarili_yeni
+                        and os.path.exists(
+                            yeni_ses_dosyasi
+                        )
+                    ):
+
+                        eski_ses_dosyasi = (
+                            sonuc.get(
+                                "ses_dosyasi",
+                                "",
+                            )
+                        )
+
+                        # Eski ses dosyasını sil.
+                        if (
+                            eski_ses_dosyasi
+                            and os.path.exists(
+                                eski_ses_dosyasi
+                            )
+                        ):
+
+                            temp_dosya_temizle(
+                                eski_ses_dosyasi
+                            )
+
+                        if (
+                            eski_ses_dosyasi
+                            in st.session_state.gecici_ses_dosyalari
+                        ):
+
+                            st.session_state.gecici_ses_dosyalari.remove(
+                                eski_ses_dosyasi
+                            )
+
+                        st.session_state.gecici_ses_dosyalari.append(
+                            yeni_ses_dosyasi
+                        )
+
+                        # ------------------------------------------------
+                        # Video + ses birleştirme
+                        # ------------------------------------------------
+
+                        temp_input_video = (
+                            sonuc.get(
+                                "temp_input_video",
+                                "",
+                            )
+                        )
+
+                        if (
+                            temp_input_video
+                            and os.path.exists(
+                                temp_input_video
+                            )
+                        ):
+
+                            yeni_output_video = (
+                                gecici_dosya_yolu(
+                                    "output",
+                                    "mp4",
+                                )
+                            )
+
+                            render_basarili = (
+                                video_ve_sesi_birlestir(
+                                    temp_input_video,
+                                    yeni_ses_dosyasi,
+                                    yeni_output_video,
+                                    log_ekle,
+                                )
+                            )
+
+                            if (
+                                render_basarili
+                                and os.path.exists(
+                                    yeni_output_video
+                                )
+                            ):
+
+                                eski_video = (
+                                    sonuc.get(
+                                        "final_video",
+                                        "",
+                                    )
+                                )
+
+                                if (
+                                    eski_video
+                                    and os.path.exists(
+                                        eski_video
+                                    )
+                                ):
+
+                                    temp_dosya_temizle(
+                                        eski_video
+                                    )
+
+                                st.session_state.sonuc[
+                                    "final_video"
+                                ] = yeni_output_video
+
+                                log_ekle(
+                                    "✅ Yeni video başarıyla üretildi."
+                                )
+
+                            else:
+
+                                log_ekle(
+                                    "⚠️ Video birleştirme başarısız; "
+                                    "sadece ses güncellendi."
+                                )
+
+                        else:
+
+                            log_ekle(
+                                "⚠️ Orijinal video bulunamadı; "
+                                "sadece ses güncellendi."
+                            )
+
+                        # ------------------------------------------------
+                        # Sonuç state'ini güncelle
+                        # ------------------------------------------------
+
+                        st.session_state.sonuc[
+                            "ses_dosyasi"
+                        ] = yeni_ses_dosyasi
+
+                        st.session_state.sonuc[
+                            "ses_basarili"
+                        ] = True
+
+                        st.session_state.sonuc[
+                            "secilen_ses_ingilizce"
+                        ] = sonuc.get(
+                            "secilen_ses_ingilizce",
+                            "",
+                        )
+
+                        st.session_state.sonuc[
+                            "kullanilan_ses_modeli"
+                        ] = (
+                            kullanilan_ses_modeli_yeni
+                            or sonuc.get(
+                                "kullanilan_ses_modeli",
+                                "?",
+                            )
+                        )
+
+                        st.session_state.sonuc[
+                            "veri"
+                        ][
+                            "seslendirme_metni"
+                        ] = temiz_metin
+
+                        # Pipeline state içindeki Reels state'i
+                        # de güncel tut.
+                        if (
+                            "pipeline_state"
+                            in st.session_state.sonuc
+                        ):
+
+                            pipeline_state_local = (
+                                st.session_state.sonuc[
+                                    "pipeline_state"
+                                ]
+                            )
+
+                            reels_state_local = (
+                                pipeline_state_local.get(
+                                    "reels_state",
+                                    {},
+                                )
+                            )
+
+                            if isinstance(
+                                reels_state_local,
+                                dict,
+                            ):
+
+                                reels_state_local[
+                                    "seslendirme_metni"
+                                ] = temiz_metin
+
+                        st.session_state._sonuc_versiyon = (
+                            st.session_state.get(
+                                "_sonuc_versiyon",
+                                0,
+                            ) + 1
+                        )
+
+                        st.success(
+                            "✅ Yeni seslendirme ve video "
+                            "başarıyla oluşturuldu."
+                        )
+
+                        st.rerun()
+
+                    # ------------------------------------------------
+                    # TTS başarısız
+                    # ------------------------------------------------
+
+                    else:
+
+                        st.error(
+                            "❌ Ses üretilemedi. "
+                            "Logları kontrol edin."
+                        )
+
+                        if os.path.exists(
+                            yeni_ses_dosyasi
+                        ):
+
+                            temp_dosya_temizle(
+                                yeni_ses_dosyasi
+                            )
+
+                except Exception as e:
+
+                    if os.path.exists(
+                        yeni_ses_dosyasi
+                    ):
+
+                        temp_dosya_temizle(
+                            yeni_ses_dosyasi
+                        )
+
+                    st.error(
+                        "❌ Yeniden üretim sırasında "
+                        "beklenmeyen hata oluştu."
+                    )
+
+                    if log_ekle:
+                        log_ekle(
+                            f"❌ Yeniden TTS/video hatası: "
+                            f"{str(e)[:300]}"
+                        )
+
+    # ========================================================
+    # 9. PIPELINE HAM DURUMU
+    # ========================================================
+
+    with st.expander(
+        "🔧 Geliştirici: Pipeline State",
+        expanded=False,
+    ):
+
+        st.caption(
+            "Debug amacıyla pipeline'ın oluşturduğu "
+            "state'ler. Normal kullanımda açmana gerek yok."
+        )
+
+        if pipeline_state:
+
+            # JSON serializable olmayan olası nesneleri
+            # güvenli biçimde string'e çevir.
+            try:
+
+                st.json(
+                    pipeline_state
+                )
+
+            except Exception:
+
+                st.code(
+                    str(pipeline_state),
+                    language=None,
+                )
