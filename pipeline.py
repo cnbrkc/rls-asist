@@ -303,6 +303,9 @@ def pipeline_calistir(
     ses_basarili, kullanilan_ses_modeli = router.ses_uret(
         seslendirme_metni, secilen_ses_ingilizce, ses_dosyasi, log_ekle, hiz_carpani=SES_HIZ_CARPANI
     )
+    # İlk başarılı ses dosyasını fallback başarısız olursa koru.
+    ilk_ses_dosyasi = ses_dosyasi if (ses_basarili and os.path.exists(ses_dosyasi)) else None
+    ilk_ses_modeli = kullanilan_ses_modeli
 
     # ---- SES SÜRESİ KONTROLÜ + FALLBACK ----
     # Fallback SADECE Reels Creative (voiceover) aşamasını tekrar çalıştırır;
@@ -322,20 +325,37 @@ def pipeline_calistir(
                 pipeline_state["reels_state"] = reels_state
                 seslendirme_metni = reels_state.get("seslendirme_metni", seslendirme_metni)
 
-                if os.path.exists(ses_dosyasi):
-                    temp_dosya_temizle(ses_dosyasi)
-
+                eski_ses = ses_dosyasi
                 ses_dosyasi = gecici_ses_yolu()
-                ses_basarili, kullanilan_ses_modeli = router.ses_uret(
+                fallback_basarili, fallback_modeli = router.ses_uret(
                     seslendirme_metni, secilen_ses_ingilizce, ses_dosyasi, log_ekle, hiz_carpani=SES_HIZ_CARPANI
                 )
-                if ses_basarili and os.path.exists(ses_dosyasi):
+                if fallback_basarili and os.path.exists(ses_dosyasi):
+                    ses_basarili = True
+                    kullanilan_ses_modeli = fallback_modeli
+                    if eski_ses != ses_dosyasi and os.path.exists(eski_ses):
+                        temp_dosya_temizle(eski_ses)
                     yeni_ses_sure = _ses_suresini_al(ses_dosyasi)
                     log_ekle(f"✅ Fallback sonrası yeni ses süresi: {yeni_ses_sure:.2f}s")
                 else:
-                    log_ekle("⚠️ Fallback ses üretimi başarısız. Önceki ses kullanılacak.")
+                    # Fallback başarısızsa ilk başarılı ses korunur.
+                    if os.path.exists(ses_dosyasi):
+                        temp_dosya_temizle(ses_dosyasi)
+                    if ilk_ses_dosyasi and os.path.exists(ilk_ses_dosyasi):
+                        ses_dosyasi = ilk_ses_dosyasi
+                        ses_basarili = True
+                        kullanilan_ses_modeli = ilk_ses_modeli
+                    else:
+                        ses_basarili = False
+                    log_ekle("⚠️ Fallback ses üretimi başarısız. İlk başarılı ses korunuyor.")
             except Exception as fallback_hata:
-                log_ekle(f"⚠️ Fallback voiceover üretimi hatası: {str(fallback_hata)[:200]}")
+                if os.path.exists(ses_dosyasi) and ses_dosyasi != ilk_ses_dosyasi:
+                    temp_dosya_temizle(ses_dosyasi)
+                if ilk_ses_dosyasi and os.path.exists(ilk_ses_dosyasi):
+                    ses_dosyasi = ilk_ses_dosyasi
+                    ses_basarili = True
+                    kullanilan_ses_modeli = ilk_ses_modeli
+                log_ekle(f"⚠️ Fallback voiceover üretimi hatası; ilk ses korunuyor: {str(fallback_hata)[:180]}")
 
     if ses_basarili and os.path.exists(ses_dosyasi):
         pipeline_state["ses_dosyasi_son"] = ses_dosyasi
