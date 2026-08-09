@@ -5,9 +5,13 @@ Yüklediğim videoyu kare kare, sesiyle birlikte analiz et. Amacımız bu videod
 {guncellik_talimati}
 
 KRİTİK GÖREV 1 — MARKA/MODEL TESPİTİ VE HALÜSİNASYON YASAĞI:
+
 1. ÖNCELİK KULLANICIYA AİTTİR: Eğer kullanıcı "VİDEO ANALİZ NOTLARI" bölümünde bir marka/model belirttiyse, kesinlikle o modeli baz al. Kullanıcının yazdığı model adını BİREBİR kullan, kısaltma, değiştirme, benzer modele yuvarlama.
+
 2. KULLANICI BELİRTMEDİYSE GÖZLE TESPİT ET: Eğer notta yazmıyorsa, videodaki logoları, emniyet kemikleri, gösterge paneli, far çizgilerini ve ekrandaki yazıları (OCR) inceleyerek marka/modeli bulmaya çalış.
+
 3. BULAMADIYSAN: Eğer videodan ve notlardan marka/model KESİNLİKLE çıkaramıyorsan, model adı uydurma. Sadece "araç" diye bahset.
+
 4. UYDURMA YASAKTIR: Videoda veya aramada olmadığı sürece HİÇBİR rakam uydurma. (Eğer marka/model tespit edemediysen internetten o araca ait fiyat/özellik UYDURMA, sadece videodaki görsel özellikleri belirt).
 
 ⚠️ BENZER MODEL TUZAĞI (KIRMIZI ÇİZGİ):
@@ -15,20 +19,45 @@ KRİTİK GÖREV 1 — MARKA/MODEL TESPİTİ VE HALÜSİNASYON YASAĞI:
 - Kullanıcı "Great Tang" dediyse, arama yaparken "BYD Great Tang" diye arat. "BYD Tang" sonuçlarını "Great Tang"e UYGULAMA.
 - Eğer aramada TAM model adıyla sonuç bulamıyorsan, "Bu model hakkında yeterli veri bulunamadı" de ve benzer modelin verilerini KULLANMA.
 
-⚠️ TÜRKİYE SATIŞ KONTROLÜ:
-- Fiyat/vergi bilgisi vermeden önce modelin Türkiye'de resmi satışı olup olmadığını KONTROL ET.
-- Türkiye'de satılmıyorsa: "Türkiye'de resmi satışı yok" de. Çin/global fiyatını verebilirsin ama TL fiyat/ÖTV/MTV UYDURMA.
+KRİTİK GÖREV 2 — GOOGLE SEARCH İLE DOĞRULAMA (ZORUNLU):
 
-KRİTİK GÖREV 2 — VİRAL VERİ TOPLAMA (GOOGLE SEARCH ZORUNLU):
-Eğer marka/modeli tespit ettiysen (kullanıcı yazdıysa veya sen bulduysan), HEMEN google_search aracını kullanarak bu araçla ilgili TÜRKİYE'DE gündem olan, gündem olacak veya bilinmeyen viral verileri topla. Sadece fiyat/sıfır km bilgisi yetmez. Şunları araştır:
+Eğer marka/modeli tespit ettiysen, HEMEN google_search aracını kullanarak aşağıdaki sorguları SIRAYLA yap. Her sorgunun sonucunu dikkatlice oku.
+
+🔍 SORGU 1 — ÜRETİM Mİ KONSEPT Mİ?:
+Arama: "[Marka Model] 2025 2026 production model release date"
+Arama: "[Marka Model] Türkiye ne zaman satışa çıkacak"
+
+BU SORGULARIN AMACI: Aracın konsept mi yoksa üretim modeli mi olduğunu belirlemek.
+- Eğer sonuçlarda "production", "üretim modeli", "satışa sunuldu", "bayilerde", "2025 model", "2026 model" gibi ifadeler varsa → ÜRETİM MODELİ
+- Eğer sonuçlarda SADECE "concept car", "prototype", "no production plans", "never produced" gibi NET ifadeler varsa → KONSEPT
+- ⚠️ DİKKAT: Bir aracın hem konsept versiyonu hem de üretim versiyonu olabilir. Videoda konsept görüntüleri olabilir ama aynı model üretime geçmiş olabilir. Bu yüzden ARAMA SONUCUNA BAK, sadece videoya bakarak karar verme.
+
+🔍 SORGU 2 — TÜRKİYE SATIŞ DURUMU:
+Arama: "[Marka Model] Türkiye fiyat 2025 2026"
+Arama: "[Marka Model] Türkiye resmi satış bayi"
+
+BU SORGULARIN AMACI: Aracın Türkiye'de satılıp satılmadığını belirlemek.
+- Eğer sonuçlarda Türkiye fiyatı, bayi bilgisi, "Türkiye'de satışa sunuldu" gibi ifadeler varsa → TÜRKİYE'DE SATIŞI VAR
+- Eğer sonuçlarda "Türkiye'de satılmıyor", "sadece Çin/Japonya/ABD'de mevcut" gibi NET ifadeler varsa → TÜRKİYE'DE SATIŞI YOK
+- Eğer hiçbir şey bulamadıysan → BİLİNMİYOR yaz
+
+🔍 SORGU 3 — VİRAL DETAYLAR:
+Arama: "[Marka Model] bilinen sorunlar kusurlar kronik"
+Arama: "[Marka Model] gizli özellik az bilinen"
+Arama: "[Marka Model] rakip karşılaştırma"
+
+Bu sorgulardan gelen bilgileri "VİRAL DETAYLAR" bölümüne ekle.
 - Bu aracın bilinen en büyük kusuru/sıkıntısı nedir? (Kamplara bölmek için)
 - Bu aracın "fısıltı etkisi" yaratacak az bilinen bir özelliği var mı?
 - Türkiye'deki güncel fiyatı, 2. el piyasası veya ÖTV/MTV durumu nedir? (SADECE Türkiye'de satılıyorsa)
 - Rakip bir araçla kıyaslandığında ezdiği veya ezildiği nokta nedir?
-Bu bilgiyi "VİRAL DETAYLAR" bölümüne kesinlikle ekle. Eğer marka/model bilinmiyorsa, sadece kategori üzerinden (örn: elektrikli SUV, sedan) Türkiye'deki genel gündemi araştır.
+
+Eğer marka/model bilinmiyorsa, sadece kategori üzerinden (örn: elektrikli SUV, sedan) Türkiye'deki genel gündemi araştır.
 
 KRİTİK GÖREV 3 — KAPAK ANI SANİYE TESPİTİ:
+
 Videodaki en çarpıcı, dikkat çekici, kapak fotoğrafı veya ilk kanca (hook) olmaya en uygun anın videodaki saniyesini (örneğin 2.4 veya 14.1 şeklinde ondalıklı sayı olarak) mutlaka tespit et ve metnin EN BAŞINA şu formatta yaz:
+
 KAPAK_ANI_SANİYE: <saniye>
 
 Bana şu başlıklarda çok net, maddeler halinde rapor ver:
@@ -42,8 +71,18 @@ Videoyu 3 ana kurgu aşamasına böl. (Video sonradan hızlandırılıp yavaşla
 2. VİRAL DETAYLAR & TÜRK İZLEYİCİSİ KANCASI (KRİTİK):
 Türk izleyicisinin gözünü durduracak spesifik görsel detaylar VE Görev 2'de google_search ile bulduğun VİRAL VERİLER (gizli kusurlar, ilginç özellikler, fiyat/gündem yorumu). Bunlar metne mutlaka entegre edilecek.
 
-3. TESPİT EDİLEN TEKNİK VERİLER:
-Marka, model (TAM ADIYLA), videoda görünen kesin özellikler ve google_search ile doğrulanmış güncel rakamlar. Türkiye'de satışı yoksa bunu AÇIKÇA belirt. (Eğer hiç tespit edilemediyse "Veri tespit edilemedi, sadece görsel betimleme yapılacak" yaz).
+3. TESPİT EDİLEN TEKNİK VERİLER (KRİTİK — METİN ÜRETİMİ BU BİLGİLERE GÖRE YAPILACAK):
+
+Marka/Model: [Tam ad]
+Üretim Durumu: [Üretim Modeli / Konsept / Bilinmiyor]
+Türkiye Satışı: [Var / Yok / Bilinmiyor]
+Türkiye Fiyatı: [Varsa TL fiyat, yoksa "Türkiye'de satışı yok"]
+Videoda Görünen Özellikler: [Liste]
+Viral Detaylar: [Google Search'ten gelen bilgiler]
+
+⚠️ ÖNEMLİ: "Üretim Durumu" ve "Türkiye Satışı" alanlarını MUTLAKA doldur. Bu bilgiler metin üretiminde kullanılacak. Eğer Google Search sonuçları belirsizse "Bilinmiyor" yaz, ASLA tahmin yürütme.
+
+(Eğer hiç tespit edilemediyse "Veri tespit edilemedi, sadece görsel betimleme yapılacak" yaz).
 
 4. KURGU & HIZLANDIRMA STRATEJİSİ: En vurucu 3-4 görsel an, seslendirme temposu notu.
 
@@ -52,5 +91,3 @@ Marka, model (TAM ADIYLA), videoda görünen kesin özellikler ve google_search 
 6. KAPANIŞ (CTA/LOOP) ÖNERİSİ: Son 3 saniyede yorum tetikleyecek, KAPANIŞ GÖRSELİYLE uyumlu cümle.
 
 7. DUYGU AKIŞI: Görsel akışa uygun duygu haritası (Örn: Açılış-merak, Orta-şok, Kapanış-tartışma).
-
-Bu bilgileri ham veri olarak ver. Ekstra konuşma yapma.
