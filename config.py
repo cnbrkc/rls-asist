@@ -79,23 +79,19 @@ TURKCE_AYLAR = {
     9: "Eylül", 10: "Ekim", 11: "Kasım", 12: "Aralık",
 }
 
-# ===== METİN ÜRETİM SCHEMASI =====
-METIN_SCHEMA = {
-    "type": "OBJECT",
-    "properties": {
-        "beyin_firtinasi": {"type": "STRING", "description": "Seslendirme metnini yazmadan ÖNCE buraya stratejini yaz. Videodaki görsel akışa göre 4 vuruşu nasıl eşleştireceğini planla."},
-        "veri_kilitleme": {"type": "STRING", "description": "Video analizinden ve internet aramasından gelen kesin rakamları buraya listele."},
-        "oz_elestiri": {"type": "STRING", "description": "Kendi planını kurallar.txt'ye göre denetle."},
-        "seslendirme_metni": {"type": "STRING"},
-        "reels_aciklamasi": {"type": "STRING"},
-        "reels_hashtagleri": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "Reels açıklaması için 5 adet ilgili hashtag."},
-        "kapak_basliklari": {
-            "type": "ARRAY",
-            "items": {"type": "OBJECT", "properties": {"ana": {"type": "STRING"}, "alt": {"type": "STRING"}}, "required": ["ana", "alt"]},
-        },
-    },
-    "required": ["beyin_firtinasi", "veri_kilitleme", "oz_elestiri", "seslendirme_metni", "reels_aciklamasi", "reels_hashtagleri", "kapak_basliklari"],
-}
+# ===== ULTIMATE PIPELINE — AŞAMA LİSTESİ (progress bar için) =====
+# ui.py bu listeyi kullanarak ilerleme çubuğunu çizer.
+PIPELINE_ADIMLARI = [
+    "🎥 Video analiz ediliyor (Forensic)...",
+    "🔎 Gerçekler doğrulanıyor (Research / Fact Lock)...",
+    "🧠 Hikâye seçiliyor (Editorial Brain)...",
+    "🎙️ Reels hazırlanıyor (Cover + Hook + Voiceover)...",
+    "📝 Caption + hashtag hazırlanıyor...",
+    "🧵 Threads hazırlanıyor...",
+    "🔍 Son kalite kontrol (QA)...",
+    "🎧 Ses üretiliyor (TTS)...",
+    "🎬 Video hazırlanıyor (render)...",
+]
 
 def guncel_tarih_metni() -> str:
     simdi = datetime.now()
