@@ -21,6 +21,7 @@ COOLDOWN_BULUNAMADI = 24 * 60 * 60
 COOLDOWN_DIGER = 5 * 60
 COOLDOWN_FREE_TIER_YOK = 7 * 24 * 60 * 60
 IP_BAN_KORUMA = 1.0
+# Geçici 429/rate-limit için varsayılan cooldown. Gerçek quota_exceeded ayrı ele alınır.
 QUOTA_RETRY_DEFAULT = 60
 
 # ===== KELİME HESAPLAMA =====

@@ -113,7 +113,7 @@ def _reels_creative_calistir(
     return router.metin_uret(icerik, system_prompt, REELS_CREATIVE_SCHEMA, log_ekle, arama_kullan=False)
 
 
-def _caption_calistir(router, reels_state, fact_state, editorial_state, log_ekle):
+def _caption_calistir(router, reels_state, fact_state, editorial_state, video_state, log_ekle):
     system_prompt = caption_promptunu_olustur()
     icerik = girdi_birlestir(
         durumu_metne_donustur("SEÇİLEN SESLENDİRME", reels_state.get("seslendirme_metni", "")),
@@ -215,7 +215,7 @@ def pipeline_calistir(
     _ilerleme(ilerlemeyi_guncelle, 5)
     log_ekle("📝 Caption + hashtag hazırlanıyor...")
     try:
-        caption_state, model_caption = _caption_calistir(router, reels_state, fact_state, editorial_state, log_ekle)
+        caption_state, model_caption = _caption_calistir(router, reels_state, fact_state, editorial_state, video_state, log_ekle)
     except Exception as caption_hata:
         log_ekle(f"⚠️ Caption üretilemedi: {str(caption_hata)[:150]}")
         caption_state, model_caption = {"reels_aciklamasi": "", "reels_hashtagleri": []}, "hata"
@@ -255,7 +255,7 @@ def pipeline_calistir(
                     sure_saniye, icerik_tonu, log_ekle,
                 )
                 pipeline_state["reels_state"] = reels_state
-                caption_state, model_caption = _caption_calistir(router, reels_state, fact_state, editorial_state, log_ekle)
+                caption_state, model_caption = _caption_calistir(router, reels_state, fact_state, editorial_state, video_state, log_ekle)
                 pipeline_state["caption_state"] = caption_state
                 threads_state, model_threads = _threads_calistir(router, video_state, fact_state, editorial_state, log_ekle)
                 pipeline_state["threads_state"] = threads_state
@@ -274,7 +274,7 @@ def pipeline_calistir(
                     # Caption, seçilen hook ve voiceover'a bağlıdır; Reels değiştiyse senkronize et.
                     try:
                         caption_state, model_caption = _caption_calistir(
-                            router, reels_state, fact_state, editorial_state, log_ekle
+                            router, reels_state, fact_state, editorial_state, video_state, log_ekle
                         )
                         pipeline_state["caption_state"] = caption_state
                         log_ekle("🔁 Reels değişti → Caption + hashtag senkronize edildi.")
@@ -286,7 +286,7 @@ def pipeline_calistir(
             if "CAPTION_FAIL" in hedefler:
                 log_ekle("🔁 Caption + hashtag yeniden üretiliyor.")
                 try:
-                    caption_state, model_caption = _caption_calistir(router, reels_state, fact_state, editorial_state, log_ekle)
+                    caption_state, model_caption = _caption_calistir(router, reels_state, fact_state, editorial_state, video_state, log_ekle)
                     pipeline_state["caption_state"] = caption_state
                 except Exception as caption_hata:
                     log_ekle(f"⚠️ Caption yeniden üretimi başarısız: {str(caption_hata)[:150]}")
@@ -360,7 +360,7 @@ def pipeline_calistir(
                     # Voiceover/hook değiştiği için caption da yeni Reels'e bağlanmalı.
                     try:
                         caption_state, model_caption = _caption_calistir(
-                            router, reels_state, fact_state, editorial_state, log_ekle
+                            router, reels_state, fact_state, editorial_state, video_state, log_ekle
                         )
                         pipeline_state["caption_state"] = caption_state
                     except Exception as caption_hata:

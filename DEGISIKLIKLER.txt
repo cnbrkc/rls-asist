@@ -1,0 +1,25 @@
+RLS-ASIST – 9 Ağustos 2026 düzeltmeleri
+
+1) Gemini 429 hata ayrıştırması düzeltildi.
+   - Geçici rate-limit ile gerçek quota_exceeded ayrılıyor.
+   - "You exceeded your current quota" artık 60 saniyelik sıradan ban olarak ele alınmıyor.
+   - API key rotasyonunun proje bazlı kotayı artırmadığı loglarda açıkça belirtiliyor.
+
+2) Google Search / Research dayanıklılığı eklendi.
+   - Search grounding kota/rate-limit hatasında pipeline artık doğrudan çökmez.
+   - Search 30 dakika geçici olarak devre dışı bırakılır.
+   - Aynı Fact Lock isteği Search'süz, daha temkinli bir prompt ile bir kez fallback olarak denenir.
+   - Fallback başarılı olursa logda açıkça belirtilir.
+
+3) Kontrollü fallback için cooldown bypass eklendi.
+   - Search denemesinde oluşan combo cooldown'ları Search'süz fallback'i engellemez.
+   - Bu bypass yalnızca bu kontrollü fallback çağrısında kullanılır.
+
+4) Pipeline'daki mevcut bir hata da düzeltildi.
+   - _caption_calistir() içinde video_state kullanılıyor ancak parametre olarak alınmıyordu.
+   - Fonksiyon ve tüm çağrıları video_state aktaracak şekilde düzeltildi.
+
+5) Mevcut çalışan Forensic → Research → Editorial → Reels → Caption → Threads → QA → TTS → Render akışı korunmuştur.
+
+Not:
+Google Gemini API limitleri proje bazında uygulanır. Üç API key aynı projeye bağlıysa üç key kullanmak aynı proje kotasını üçe katlamaz. Bu kod, kota sorununu sihirli biçimde ortadan kaldırmaz; fakat Search grounding kaynaklı 429 durumunda uygulamanın gereksiz yere tamamen çökmesini önler ve güvenli bir fallback dener.
