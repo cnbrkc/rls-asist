@@ -21,6 +21,11 @@ class SmartRouter:
     def __init__(self) -> None:
         if "blacklist" not in st.session_state:
             st.session_state.blacklist = {}
+        # Son isteğin kota/rate-limit yüzünden tamamen başarısız olup olmadığını
+        # takip eder. Bu bilgi özellikle Google Search grounding başarısızlığında
+        # aynı Fact Lock isteğini Search'süz güvenli fallback ile sürdürebilmek için
+        # kullanılır.
+        self._last_request_had_quota = False
 
     def _is_banned(self, mail: str, model: str) -> bool:
         now = time.time()
@@ -36,6 +41,32 @@ class SmartRouter:
     def _ban(self, mail: str, model: str, cooldown: int, scope: str) -> None:
         key = f"*+{model}" if scope == "model" else (f"{mail}+*" if scope == "key" else f"{mail}+{model}")
         st.session_state.blacklist[key] = time.time() + cooldown
+
+    def _clear_cooldowns(self, model_listesi=None) -> None:
+        """Geçici router cooldown'larını temizler.
+
+        Research sırasında Google Search grounding 429 verip, aynı Fact Lock
+        isteği Search'süz başarıyla tamamlanırsa, Search denemesinin bıraktığı
+        cooldown'ların sonraki Editorial/Reels aşamalarını gereksiz yere
+        kilitlemesini önler.
+        """
+        bl = st.session_state.blacklist
+        if not model_listesi:
+            bl.clear()
+            return
+
+        modeller = set(model_listesi)
+        silinecek = []
+        for key in list(bl.keys()):
+            # *+MODEL veya KEY+MODEL biçimindeki kayıtlar
+            if "+" not in key:
+                continue
+            sol, sag = key.split("+", 1)
+            if sag in modeller:
+                silinecek.append(key)
+
+        for key in silinecek:
+            bl.pop(key, None)
 
     def _retry_delay_cikar(self, hata_metni: str) -> int:
         match = re.search(r"retryDelay[\"':\s]+(\d+)", hata_metni)
@@ -53,131 +84,62 @@ class SmartRouter:
         return 0
 
     def _parse_hata(self, hata_metni: str) -> Tuple[str, int]:
-        """Gemini hatasını mümkün olduğunca doğru sınıflandırır.
-
-        429 tek başına "60 saniye bekle" anlamına gelmez. Google'ın güncel
-        dokümantasyonunda 429; RPM/TPM/RPD veya harcamaya dayalı limitler
-        nedeniyle oluşabilir. Özellikle "You exceeded your current quota"
-        ifadesi günlük/plan kotası gibi daha kalıcı bir kotaya işaret edebilir.
-        """
-        text = (hata_metni or "").lower()
-
-        if "limit: 0" in text or 'limit": 0' in text:
+        if "limit: 0" in hata_metni or "limit\": 0" in hata_metni:
             return "free_tier_yok", COOLDOWN_FREE_TIER_YOK
-
-        # Kalıcı/plan kotası: retryDelay olsa bile bunu sıradan 60 sn rate-limit
-        # gibi ele alma. Key rotasyonu da proje bazlı limitleri aşmaz.
-        quota_markers = (
-            "quota_exceeded",
-            "you exceeded your current quota",
-            "exceeded your current quota",
-            "daily quota",
-            "quota limit",
-        )
-        if any(marker in text for marker in quota_markers):
-            return "quota_exceeded", 0
-
-        # Geçici 429 / rate-limit. retryDelay varsa onu kullanacağız.
-        if "rate_limit_exceeded" in text or "too many requests" in text:
-            return "rate_limit", 0
-        if "429" in text or "resource_exhausted" in text:
+        if "429" in hata_metni or "resource_exhausted" in hata_metni or "quota" in hata_metni:
             return "quota", 0
-
-        if "503" in text or "unavailable" in text:
+        if "503" in hata_metni or "unavailable" in hata_metni:
             return "combo", COOLDOWN_SUNUCU
-        if "404" in text or "not_found" in text or "model_not_found" in text:
+        if "404" in hata_metni or "not_found" in hata_metni:
             return "model", COOLDOWN_BULUNAMADI
-        if "403" in text or "permission_denied" in text:
-            return "key", COOLDOWN_DIGER
         return "combo", COOLDOWN_DIGER
 
     def _handle_hata(self, mail: str, model: str, hata_metni: str, log_ekle) -> str:
         scope, cooldown = self._parse_hata(hata_metni)
-
         if scope == "free_tier_yok":
-            log_ekle(f" 🚫 {model} free tier'da YOK (limit: 0) → model 7 gün devre dışı")
+            log_ekle(f" 🚫 {model} free tier'da YOK (limit: 0) → 7 gün banlandı")
             self._ban(mail, model, cooldown, "model")
             time.sleep(IP_BAN_KORUMA)
             return "break_model"
-
-        if scope == "quota_exceeded":
-            # Bu, basit RPM limitinden farklıdır. Key'ler aynı projeye bağlıysa
-            # üç ayrı key kullanmak aynı proje kotasını üçe katlamaz.
-            # Yine de mevcut router mantığını koruyarak combo'yu uzun cooldown'a
-            # alıyor ve sonraki model/key kombinasyonlarına geçiyoruz.
-            long_cooldown = max(QUOTA_RETRY_DEFAULT, 30 * 60)
-            self._ban(mail, model, long_cooldown, "combo")
-            log_ekle(
-                f" ⛔ {mail} + {model}: kalıcı/plan kotası aşıldı → "
-                f"{long_cooldown // 60} dk cooldown. Key rotasyonu kotayı artırmaz."
-            )
-            time.sleep(IP_BAN_KORUMA)
-            return "devam"
-
-        if scope == "rate_limit":
-            delay = self._retry_delay_cikar(hata_metni)
-            ban_sure = delay if delay > 0 else QUOTA_RETRY_DEFAULT
-            self._ban(mail, model, ban_sure, "combo")
-            log_ekle(f" ⏳ {mail} + {model}: geçici rate-limit → {ban_sure}sn cooldown")
-            time.sleep(IP_BAN_KORUMA)
-            return "devam"
-
         if scope == "quota":
+            self._last_request_had_quota = True
             delay = self._retry_delay_cikar(hata_metni)
             ban_sure = delay if delay > 0 else QUOTA_RETRY_DEFAULT
             self._ban(mail, model, ban_sure, "combo")
-            log_ekle(f" ⏳ {mail} + {model}: geçici kota/rate-limit → {ban_sure}sn cooldown")
+            log_ekle(f" ⏳ {mail} kota aştı → {ban_sure}sn banlandı, diğer key deneniyor")
             time.sleep(IP_BAN_KORUMA)
             return "devam"
 
         ban_sure = f"{cooldown // 60} dk" if cooldown < 3600 else f"{cooldown // 3600} saat"
         if scope == "model":
-            log_ekle(f" ❌ {model} MODEL bazlı hata → TÜM key'ler için {ban_sure} devre dışı")
+            log_ekle(f" ❌ {model} MODEL bazlı hata → TÜM key'ler için {ban_sure} banlandı")
             self._ban(mail, model, cooldown, "model")
             time.sleep(IP_BAN_KORUMA)
             return "break_model"
         else:
-            log_ekle(f" ⚠️ {mail} hatası → {model} ile {ban_sure} cooldown, diğer key deneniyor")
+            log_ekle(f" ⚠️ {mail} hatası → {model} ile {ban_sure} banlandı, diğer key deneniyor")
             self._ban(mail, model, cooldown, scope)
             time.sleep(IP_BAN_KORUMA)
             return "devam"
 
-    def _make_request(
-        self,
-        model_listesi: List[str],
-        contents: Any,
-        config: types.GenerateContentConfig,
-        log_ekle,
-        ignore_bans: bool = False,
-    ) -> Tuple[Any, str]:
-        """Model + key rotasyonu.
-
-        ignore_bans yalnızca kontrollü fallback için kullanılır. Örneğin
-        Google Search grounding kotası bittiğinde aynı model, Search kapalı
-        olarak bir kez daha denenebilir; aksi halde Search denemesinde oluşan
-        combo cooldown'u gerçek fallback çağrısını da engeller.
-        """
+    def _make_request(self, model_listesi: List[str], contents: Any, config: types.GenerateContentConfig, log_ekle) -> Tuple[Any, str]:
         son_hata = None
-        herhangi_bir_kombinasyon = False
-
+        self._last_request_had_quota = False
         for model_adi in model_listesi:
             log_ekle(f"🧠 Model deneniyor: {model_adi}")
             model_denendi = False
-
             for mail, api_key in API_KEYS.items():
-                if not ignore_bans and self._is_banned(mail, model_adi):
-                    log_ekle(f" ⏸️ {mail} + {model_adi} cooldown'da, atlanıyor")
+                if self._is_banned(mail, model_adi):
+                    log_ekle(f" ⏸️ {mail} + {model_adi} banlı, atlanıyor")
                     continue
-
                 model_denendi = True
-                herhangi_bir_kombinasyon = True
                 log_ekle(f" 🚀 {mail} ile {model_adi} deneniyor...")
                 try:
                     client = genai.Client(api_key=api_key)
                     response = client.models.generate_content(
                         model=model_adi,
                         contents=contents,
-                        config=config,
+                        config=config
                     )
                     log_ekle(f" ✅ Başarılı → {mail} + {model_adi}")
                     time.sleep(IP_BAN_KORUMA)
@@ -187,121 +149,66 @@ class SmartRouter:
                     aksiyon = self._handle_hata(mail, model_adi, str(e), log_ekle)
                     if aksiyon == "break_model":
                         break
-
             if not model_denendi:
-                log_ekle(f" ⏸️ {model_adi} tüm key'ler için cooldown'da, atlanıyor")
+                log_ekle(f" ⏸️ {model_adi} tüm key'ler için banlı, atlanıyor")
+        raise son_hata if son_hata else Exception("Tüm model+key kombinasyonları başarısız.")
 
-        if son_hata:
-            raise son_hata
-        if not herhangi_bir_kombinasyon:
-            raise Exception("Tüm model+key kombinasyonları cooldown'da.")
-        raise Exception("Tüm model+key kombinasyonları başarısız.")
+    def metin_uret(self, icerik: Any, system_prompt: str, response_schema: dict, log_ekle, model_listesi=None, arama_kullan: bool = True) -> Tuple[dict, str]:
+        """
+        Genel metin/JSON üretim motoru. Pipeline'daki TÜM metin aşamaları
+        (Research, Editorial, Reels Creative, Caption, Threads, QA) bu tek
+        metodu farklı system_prompt + response_schema + icerik ile çağırır.
 
-    def _arama_cooldown_aktif_mi(self) -> bool:
-        """Session seviyesinde Search grounding cooldown kontrolü."""
-        until = st.session_state.get("gemini_search_disabled_until", 0.0)
-        if time.time() < until:
-            return True
-        if until:
-            st.session_state.pop("gemini_search_disabled_until", None)
-        return False
-
-    def _arama_cooldown_ayarla(self, saniye: int = 30 * 60) -> None:
-        st.session_state.gemini_search_disabled_until = time.time() + saniye
-
-    def metin_uret(
-        self,
-        icerik: Any,
-        system_prompt: str,
-        response_schema: dict,
-        log_ekle,
-        model_listesi=None,
-        arama_kullan: bool = True,
-    ) -> Tuple[dict, str]:
-        """Genel metin/JSON üretim motoru.
-
-        Research/Fact Lock için Google Search grounding önceliklidir. Search
-        kotası/rate-limit yüzünden çağrı başarısız olursa pipeline'ın tamamını
-        çökertmek yerine Search'süz kontrollü bir fallback denenir. Böylece
-        normal metin üretimi çalışmaya devam eder; log da bu fallback'in
-        gerçekleştiğini açıkça bildirir.
+        icerik: string ya da (video_part gerekmeyen) parça listesi olabilir.
         """
         if model_listesi is None:
             model_listesi = METIN_MODELLERI
-        if not model_listesi:
-            raise ValueError("Metin model listesi boş.")
-
-        search_aktif = bool(arama_kullan and model_arama_destekliyor_mu(model_listesi[0]))
-        if search_aktif and self._arama_cooldown_aktif_mi():
-            search_aktif = False
-            log_ekle(" ⚠️ Google Search grounding geçici olarak cooldown'da → Search'süz kontrollü fallback kullanılıyor")
-
-        def _config_olustur(search_kullan: bool):
-            kwargs = dict(
-                system_instruction=system_prompt,
-                response_mime_type="application/json",
-                response_schema=response_schema,
-            )
-            if search_kullan:
-                kwargs["tools"] = [types.Tool(google_search=types.GoogleSearch())]
-            return types.GenerateContentConfig(**kwargs)
-
-        if search_aktif:
+        config_parametreleri = dict(
+            system_instruction=system_prompt,
+            response_mime_type="application/json",
+            response_schema=response_schema,
+        )
+        if arama_kullan and model_arama_destekliyor_mu(model_listesi[0]):
+            config_parametreleri["tools"] = [types.Tool(google_search=types.GoogleSearch())]
             log_ekle(f" 🔎 {model_listesi[0]} için güncel bilgi araması aktif")
+        config = types.GenerateContentConfig(**config_parametreleri)
 
-        config = _config_olustur(search_aktif)
         try:
             response, info = self._make_request(model_listesi, icerik, config, log_ekle)
-            return guvenli_json_yukle(getattr(response, "text", "")), info
-        except Exception as ilk_hata:
-            if not search_aktif:
-                raise
+        except Exception:
+            # Google Search grounding quota/rate-limit yüzünden başarısız olduysa
+            # bütün model+key kombinasyonlarını 30 dk kilitleyip pipeline'ı
+            # düşürmek yerine aynı Fact Lock isteğini Search'süz bir kez dene.
+            # Başarılı Search'süz çağrıdan sonra Search denemesinin geçici
+            # cooldown'larını temizle ki Editorial/Reels aşamaları çalışabilsin.
+            if arama_kullan and self._last_request_had_quota:
+                log_ekle(
+                    " 🔁 Google Search çağrısı kota/rate-limit nedeniyle başarısız oldu. "
+                    "Search 30 dk geçici kapatılıyor; aynı Fact Lock isteği Search'süz bir kez deneniyor."
+                )
+                self._clear_cooldowns(model_listesi)
 
-            hata_metni = str(ilk_hata)
-            # Search grounding kotası / 429 kaynaklı olma ihtimali varsa
-            # Search'ü geçici kapatıp aynı üretimi bir kez Search'süz deniyoruz.
-            parse_scope, _ = self._parse_hata(hata_metni)
-            search_fallback_gerekli = parse_scope in {"quota_exceeded", "quota", "rate_limit"}
+                fallback_config_parametreleri = dict(
+                    system_instruction=system_prompt,
+                    response_mime_type="application/json",
+                    response_schema=response_schema,
+                )
+                fallback_config = types.GenerateContentConfig(**fallback_config_parametreleri)
 
-            if not search_fallback_gerekli:
-                raise
-
-            self._arama_cooldown_ayarla(30 * 60)
-            log_ekle(
-                " 🔁 Google Search çağrısı kota/rate-limit nedeniyle başarısız oldu. "
-                "Search 30 dk geçici kapatılıyor; aynı Fact Lock isteği Search'süz bir kez deneniyor."
-            )
-
-            fallback_system_prompt = (
-                system_prompt
-                + "\n\n[SEARCH FALLBACK]\n"
-                "Google Search bu çağrıda kullanılamıyor. YALNIZCA modelin güvenilir biçimde bildiği bilgileri kullan. "
-                "Güncel olduğu doğrulanamayan ayrıntıları kesin gerçek gibi yazma. Emin olmadığın alanları BILINMIYOR/UNKNOWN olarak işaretle. "
-                "Kullanıcıdan gelen görsel gözlemlerini gerçek kaynak bilgisi gibi genişletme."
-            )
-            fallback_config = _config_olustur(False)
-            fallback_config = types.GenerateContentConfig(
-                system_instruction=fallback_system_prompt,
-                response_mime_type="application/json",
-                response_schema=response_schema,
-            )
-
-            try:
                 response, info = self._make_request(
                     model_listesi,
                     icerik,
                     fallback_config,
                     log_ekle,
-                    ignore_bans=True,
                 )
-                log_ekle(" ⚠️ Fact Lock Search'süz fallback ile tamamlandı. Güncel doğrulama yapılamayan alanlar işaretlendi.")
+                log_ekle(
+                    " ⚠️ Fact Lock Search'süz fallback ile tamamlandı. "
+                    "Güncel doğrulama yapılamayan alanlar işaretlendi."
+                )
                 return guvenli_json_yukle(getattr(response, "text", "")), info
-            except Exception as fallback_hata:
-                # İlk hatayı kaybetme; asıl kök neden çoğu zaman daha açıklayıcıdır.
-                raise RuntimeError(
-                    "Google Search grounding ve Search'süz Gemini fallback'i başarısız oldu. "
-                    f"İlk hata: {hata_metni[:500]} | Fallback: {str(fallback_hata)[:500]}"
-                ) from fallback_hata
+            raise
+
+        return guvenli_json_yukle(getattr(response, "text", "")), info
 
     def ses_uret(self, metin: str, ses_adi: str, cikti_dosyasi: str, log_ekle, hiz_carpani: float = 1.0) -> Tuple[bool, Optional[str]]:
         # 🔥 GÜVENLİK FİLTRELERİNİ KAPAT (TTS metinleri yanlışlıkla bloklanmasın diye)
