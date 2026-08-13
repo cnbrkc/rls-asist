@@ -13,6 +13,11 @@ from config import (
     TURKCE_AYLAR,
 )
 
+# Pipeline boyunca aynı kullanıcı video analiz notunu erişilebilir tutar.
+# Amaç: kullanıcı tarafından verilen kesin bilgi yalnızca ilk video çağrısında
+# kalmasın; Research/Editorial/Reels/Caption/Threads/QA girdilerine de taşınsın.
+_AKTIF_VIDEO_ANALIZ_NOTU = ""
+
 
 def prompt_dosyasini_oku(dosya_adi: str) -> str:
     """prompts/ klasöründeki prompt dosyasını oku."""
@@ -82,6 +87,8 @@ def _kelime_hedefleri(sure_saniye: int, kelime_hizi_orani: float = None):
 # ROLE 1 — FORENSIC VIDEO ANALYSIS
 # ============================================================
 def forensic_analiz_promptunu_olustur(ek_notlar_bolumu: str, sure_saniye: int) -> str:
+    global _AKTIF_VIDEO_ANALIZ_NOTU
+    _AKTIF_VIDEO_ANALIZ_NOTU = ek_notlar_bolumu or ""
     sablon = prompt_dosyasini_oku("forensic_analysis_prompt.txt")
     return sablon.format(
         ek_notlar_bolumu=ek_notlar_bolumu,
@@ -112,11 +119,6 @@ def reels_creative_promptunu_olustur(
     icerik_tonu: str,
     kelime_hizi_orani: float = None,
 ) -> str:
-    """
-    kelime_hizi_orani:
-      - None ise varsayılan KELIME_HIZI_ORANI kullanılır.
-      - Fallback (ses çok kısa kaldıysa) durumunda artırılabilir.
-    """
     hedef_kelime, min_kelime, max_kelime, kelime_hizi_orani = _kelime_hedefleri(
         sure_saniye, kelime_hizi_orani
     )
@@ -157,19 +159,27 @@ def qa_promptunu_olustur() -> str:
 # YARDIMCI: PIPELINE STATE'İ MODEL İÇİN OKUNABİLİR METNE ÇEVİR
 # ============================================================
 def durumu_metne_donustur(baslik: str, veri) -> str:
-    """
-    Bir pipeline state parçasını (dict/list) etiketli, okunabilir bir metne
-    çevirir. Token optimizasyonu için her aşamaya SADECE ihtiyacı olan
-    state parçaları bu fonksiyonla ayrı ayrı etiketlenip birleştirilir.
+    """Pipeline state parçasını etiketli metne çevirir.
+
+    Kullanıcı video analiz notu aktifse her model girdisine ayrıca eklenir.
+    Böylece ilk forensic çağrısında verilen kesin bilgi sonraki aşamalarda
+    kaybolamaz ve modelin görsel çıkarımıyla sessizce değiştirilemez.
     """
     try:
         govde = json.dumps(veri, ensure_ascii=False, indent=2)
     except (TypeError, ValueError):
         govde = str(veri)
-    return f"--- {baslik} ---\n{govde}\n"
+    parca = f"--- {baslik} ---\n{govde}\n"
+    if _AKTIF_VIDEO_ANALIZ_NOTU.strip() and baslik != "KULLANICI VIDEO ANALİZ NOTU":
+        parca += (
+            "--- KULLANICI VIDEO ANALİZ NOTU — ÖNCELİKLİ KAYNAK ---\n"
+            f"{_AKTIF_VIDEO_ANALIZ_NOTU.strip()}\n"
+            "Bu notta kullanıcı tarafından verilen araç/model/variant bilgileri "
+            "görsel çıkarımlardan önce gelir ve sonraki aşamalarda değiştirilemez.\n"
+        )
+    return parca
 
 
 def girdi_birlestir(*parcalar: str) -> str:
-    """Birden fazla 'durumu_metne_donustur' çıktısını (veya düz metni) tek bir
-    model girdisi haline getirir."""
+    """Birden fazla state/metin parçasını tek model girdisi haline getirir."""
     return "\n".join(p for p in parcalar if p and p.strip())
